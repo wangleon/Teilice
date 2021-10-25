@@ -2,7 +2,7 @@ import numpy as np
 import astropy.io.fits as fits
 from astropy.wcs import WCS
 
-class TesscutImage():
+class TesscutImage(object):
     def __init__(self, filename):
         self.filename = filename
 
