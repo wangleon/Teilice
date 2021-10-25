@@ -8,10 +8,15 @@ import astropy.units as u
 import astropy.io.fits as fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
+from astropy.wcs import WCS
 from astroquery.vizier import Vizier
+from astroquery.mast import Tesscut
+from astroquery.skyview import SkyView
 
 from .tesscutimage import TesscutImage
+from .aperture import Aperture
 cache_path = os.path.expanduser('~/.teilice')
+
 
 def get_aperture_bound(aperture):
     bound_lst = []
@@ -63,7 +68,9 @@ class TessLightCurve(object):
     tesscut_path = os.path.join(cache_path, 'tesscut')
 
 
-    def __init__(self, tic):
+    def __init__(self, tic, xsize=15, ysize=15, aperture=None):
+
+        # check existence of cache folders
         if not os.path.exists(cache_path):
             os.mkdir(cache_path)
         if not os.path.exists(self.nearby_path):
@@ -79,6 +86,11 @@ class TessLightCurve(object):
         self.tmag = info['Tmag']
         self.coord = SkyCoord(self.ra, self.dec, unit='deg')
 
+        self.xsize = xsize
+        self.ysize = ysize
+
+        if aperture is not None:
+            self.aperture = Aperture(aperture)
 
     def get_tesscutfile(self):
         pattern = 'tess\-s(\d{4})\-(\d)\-(\d)_(\d+\.\d+)_(\-?\d+\.\d+)_\d+x\d+_astrocut\.fits'
@@ -102,18 +114,20 @@ class TessLightCurve(object):
         return filename_lst
 
     def download_tesscut(self):
-        self.xsize = 15
-        self.ysize = 15
-        website = 'https://mast.stsci.edu/tesscut'
-        url = '{}/api/v0.1/astrocut?ra={}&dec={}&y={}&x={}'.format(
-                website, self.ra, self.dec, self.ysize, self.xsize)
-        outfile = 'tesscut_tic{:011d}_{}x{}.zip'.format(
-                self.tic, self.xsize, self.ysize)
-        outfilename = os.path.join(self.tesscut_path, outfile)
-        command = 'wget -O {} --content-disposition "{}"'.format(outfilename, url)
-        os.system(command)
-        command = 'unzip {} -d {}'.format(outfilename, self.tesscut_path)
-        os.system(command)
+        #website = 'https://mast.stsci.edu/tesscut'
+        #url = '{}/api/v0.1/astrocut?ra={}&dec={}&y={}&x={}'.format(
+        #        website, self.ra, self.dec, self.ysize, self.xsize)
+        #outfile = 'tesscut_tic{:011d}_{}x{}.zip'.format(
+        #        self.tic, self.xsize, self.ysize)
+        #outfilename = os.path.join(self.tesscut_path, outfile)
+        ##command = 'wget -O {} --content-disposition "{}"'.format(outfilename, url)
+        #command = 'wget --content-disposition "{}"'.format(url)
+        #os.system(command)
+        #command = 'unzip {} -d {}'.format(outfilename, self.tesscut_path)
+        #os.system(command)
+        Tesscut.download_cutouts(coordinates=self.coord,
+                size=(self.ysize, self.xsize), path=self.tesscut_path,
+                inflate=True)
 
 
     def get_nearbystars(self, r=250):
@@ -142,6 +156,18 @@ class TessLightCurve(object):
 
         self.tictable = tictable
 
+    def apply_aperture(self, tesscutimg):
+        x, y = tesscutimg.wcoord.all_world2pix([self.ra], [self.dec], 0)
+        x0 = int(x)+1
+        y0 = int(y)+1
+        self.aperture_mask = np.zeros((tesscutimg.ny, tesscutimg.nx))
+        cy = self.aperture.center[0]
+        cx = self.aperture.center[1]
+
+        # copy the aperture data to the new aperture mask array
+        for iy in np.arange(self.aperture.shape[0]):
+            for ix in np.arange(self.aperture.shape[1]):
+                self.aperture_mask[y0+iy-cy, x0+ix-cx] = self.aperture.data[iy, ix]
 
     def get_lc(self):
 
@@ -154,18 +180,16 @@ class TessLightCurve(object):
 
         for filename, sector, camera, ccd in filename_lst:
             tesscutimg = TesscutImage(filename)
+            self.apply_aperture(tesscutimg)
 
-            aperture = np.zeros((tesscutimg.ny, tesscutimg.nx))
-            #aperture[6:10, 6:11] = 1
-            aperture[6:11, 5:10] = 1
-            #aperture[6:11, 6:10] = 1
-            #aperture[5:13, 1:9] = 1
+            aperture = self.aperture_mask
             objmask = aperture>0
             nobj = objmask.sum()
             tesscutimg.set_aperture(aperture)
 
             fluximg = tesscutimg.fluxarray[0]
             bkgmask = fluximg < np.percentile(fluximg, 50)
+            bkgmask = bkgmask*(~objmask)
             nbkg = bkgmask.sum()
             tesscutimg.set_bkgmask(bkgmask)
 
@@ -221,7 +245,8 @@ class TessLightCurve(object):
             hdulst.writeto(outfilename, overwrite=True)
 
 
-            self.plot_lc_image(tesscutimg, 'tesscut_{:011d}.png'.format(self.tic))
+            #self.plot_lc_image(tesscutimg, 'tesscut_{:011d}.png'.format(self.tic))
+            self.plot_image2(tesscutimg, 'tesscut2_{:011d}.png'.format(self.tic))
 
 
     def plot_lc_image(self, tesscutimg, figname):
@@ -329,6 +354,76 @@ class TessLightCurve(object):
         i = imin
 
 
+    def plot_image2(self, tesscutimg, figname):
+
+        fig = plt.figure(figsize=(12, 5), dpi=200)
+        ax1 = fig.add_axes([0.08, 0.10, 0.4, 0.8],
+                    projection=tesscutimg.wcoord)
+
+        bcx_med = np.median(self.bcx_lst)
+        bcy_med = np.median(self.bcy_lst)
+        dist_lst = (self.bcx_lst-bcx_med)**2 + (self.bcy_lst-bcy_med)**2
+        i = dist_lst.argmin()
+        cax = ax1.imshow(tesscutimg.fluxarray[i],
+                vmin=tesscutimg.vmin, vmax=tesscutimg.vmax, cmap='YlGnBu_r')
+
+        # plot aperture
+        bound_lst = get_aperture_bound(tesscutimg.aperture)
+        for (x1, y1, x2, y2) in bound_lst:
+            ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-', )
+
+        # plot background mask
+        bkgbound_lst = get_aperture_bound(tesscutimg.bkgmask)
+        for (x1, y1, x2, y2) in bkgbound_lst:
+            ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r--', lw=0.5)
+
+        ax1.grid(True, color='w', ls='--', lw=0.5)
+
+        xcoords = ax1.coords[0]
+        ycoords = ax1.coords[1]
+        xcoords.set_major_formatter('d.ddd')
+        ycoords.set_major_formatter('d.ddd')
+        xcoords.set_axislabel('RA (deg)')
+        ycoords.set_axislabel('Dec (deg)')
+
+        paths = SkyView.get_images(position=self.coord, survey='DSS',
+                radius = 15/2*21*u.arcsec*3,
+                sampler='Clip',
+                scaling = 'Log',
+                pixels = (400, 400),
+                )
+        hdu = paths[0][0]
+        data = hdu.data
+        head = hdu.header
+        wcoord2 = WCS(head)
+        ax2 = fig.add_axes([0.52, 0.10, 0.4, 0.8],
+                    projection=wcoord2)
+        ax2.imshow(data, cmap='gray_r')
+
+        for iy in np.arange(-0.5, self.ysize, 1):
+            x_lst = [-0.5, self.xsize-0.5]
+            y_lst = [iy, iy]
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
+        for ix in np.arange(-0.5, self.xsize, 1):
+            x_lst = [ix, ix]
+            y_lst = [-0.5, self.ysize-0.5]
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
+
+        #x_lst = [0, 0, self.xsize, self.xsize, 0]
+        #y_lst = [0, self.ysize, self.ysize, 0, 0]
+        xcoords = ax2.coords[0]
+        ycoords = ax2.coords[1]
+        xcoords.set_major_formatter('d.ddd')
+        ycoords.set_major_formatter('d.ddd')
+        xcoords.set_axislabel('RA (deg)')
+        ycoords.set_axislabel('Dec (deg)')
+
+        fig.savefig(figname)
+        plt.close(fig)
 
 
 
