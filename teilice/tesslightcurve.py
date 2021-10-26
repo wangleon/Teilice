@@ -15,27 +15,9 @@ from astroquery.skyview import SkyView
 
 from .tesscutimage import TesscutImage
 from .aperture import Aperture
+from .visualize import Tesscut_LC, make_movie
 cache_path = os.path.expanduser('~/.teilice')
 
-
-def get_aperture_bound(aperture):
-    bound_lst = []
-    ny, nx = aperture.shape
-    for iy in np.arange(ny):
-        for ix in np.arange(nx):
-            if aperture[iy, ix]>0:
-                line_lst = [(ix, iy,   ix, iy+1),
-                            (ix, iy+1, ix+1, iy+1),
-                            (ix+1, iy, ix+1, iy+1),
-                            (ix, iy,   ix+1, iy),
-                            ]
-                for line in line_lst:
-                    if line in bound_lst:
-                        index = bound_lst.index(line)
-                        bound_lst.pop(index)
-                    else:
-                        bound_lst.append(line)
-    return bound_lst
 
 def get_sourceinfo(tic):
     catid = 'IV/38/tic'
@@ -66,7 +48,6 @@ class TessLightCurve(object):
 
     nearby_path = os.path.join(cache_path, 'nearby')
     tesscut_path = os.path.join(cache_path, 'tesscut')
-
 
     def __init__(self, tic, xsize=15, ysize=15, aperture=None):
 
@@ -176,29 +157,31 @@ class TessLightCurve(object):
         if len(filename_lst)==0:
             self.download_tesscut()
             filename_lst = self.get_tesscutfile()
-        print(filename_lst)
 
         for filename, sector, camera, ccd in filename_lst:
             tesscutimg = TesscutImage(filename)
             self.apply_aperture(tesscutimg)
 
+            # set photometric aperture
             aperture = self.aperture_mask
             objmask = aperture>0
             nobj = objmask.sum()
             tesscutimg.set_aperture(aperture)
 
-            fluximg = tesscutimg.fluxarray[0]
+            # determine background aperture
+            # find the first layer that QUALITY flag==0
+            i = np.nonzero(tesscutimg.q_lst==0)[0][0]
+            fluximg = tesscutimg.fluxarray[i]
             bkgmask = fluximg < np.percentile(fluximg, 50)
             bkgmask = bkgmask*(~objmask)
             nbkg = bkgmask.sum()
             tesscutimg.set_bkgmask(bkgmask)
 
-            t_lst, flux_lst, bkg_lst = [], [], []
+            t_lst, q_lst, flux_lst, bkg_lst = [], [], [], []
             bcx_lst, bcy_lst = [], []
             for row in tesscutimg.table:
-                if row['QUALITY']>0:
-                    continue
                 t_lst.append(row['TIME'])
+                q_lst.append(row['QUALITY'])
                 fluximg = row['FLUX']
                 xsum = (fluximg*aperture).sum(axis=0)
                 ysum = (fluximg*aperture).sum(axis=1)
@@ -214,6 +197,7 @@ class TessLightCurve(object):
                 bcy_lst.append(bcy)
     
             self.t_lst = np.array(t_lst)
+            self.q_lst = np.array(q_lst)
             self.flux_lst = np.array(flux_lst)
             self.bkg_lst  = np.array(bkg_lst)
             self.bcx_lst  = np.array(bcx_lst)
@@ -222,20 +206,22 @@ class TessLightCurve(object):
 
             lc_table = Table(dtype=[
                     ('TIME',        '<f4'),
+                    ('QUALITY',     '<i4'),
                     ('FLUX_RAW',    '<f4'),
                     ('BKG',         '<f4'),
                     ('FLUX_CORR',   '<f4'),
                     ('BCX',         '<f4'),
                     ('BCY',         '<f4'),
                     ])
-            for t, f, b, fc, cx, cy in zip(
+            for t, q, f, b, fc, cx, cy in zip(
                     self.t_lst,
+                    self.q_lst,
                     self.flux_lst,
                     self.bkg_lst,
                     self.fluxcorr_lst,
                     self.bcx_lst,
                     self.bcy_lst):
-                lc_table.add_row((t, f, b, fc, cx, cy))
+                lc_table.add_row((t, q, f, b, fc, cx, cy))
             hdulst = fits.HDUList([
                         fits.PrimaryHDU(),
                         fits.BinTableHDU(data=lc_table),
@@ -244,77 +230,15 @@ class TessLightCurve(object):
                         self.tic, sector, camera, ccd)
             hdulst.writeto(outfilename, overwrite=True)
 
+            fig = Tesscut_LC(self, tesscutimg, figsize=(12, 5), dpi=200)
+            figname = 'tesscut_{:011d}_s{:04d}_{}_{}.png'.format(
+                        self.tic, sector, camera, ccd)
+            fig.savefig(figname)
 
-            #self.plot_lc_image(tesscutimg, 'tesscut_{:011d}.png'.format(self.tic))
-            self.plot_image2(tesscutimg, 'tesscut2_{:011d}.png'.format(self.tic))
-
-
-    def plot_lc_image(self, tesscutimg, figname):
-
-        fig = plt.figure(figsize=(12, 5), dpi=200)
-        ax1 = fig.add_axes([0.08, 0.10, 0.4, 0.8],
-                    projection=tesscutimg.wcoord)
-        ax2  = fig.add_axes([0.60, 0.55, 0.35, 0.35])
-        ax3 = fig.add_axes([0.60, 0.10, 0.35, 0.35])
-        axc = fig.add_axes([0.47, 0.10, 0.01, 0.8])
-
-        bcx_med = np.median(self.bcx_lst)
-        bcy_med = np.median(self.bcy_lst)
-        dist_lst = (self.bcx_lst-bcx_med)**2 + (self.bcy_lst-bcy_med)**2
-        i = dist_lst.argmin()
-
-        cax = ax1.imshow(tesscutimg.fluxarray[i], origin='lower',
-                vmin=tesscutimg.vmin, vmax=tesscutimg.vmax, cmap='YlGnBu_r')
-        _x1, _x2 = ax1.get_xlim()
-        _y1, _y2 = ax1.get_ylim()
-        
-        # plot aperture
-        bound_lst = get_aperture_bound(tesscutimg.aperture)
-        for (x1, y1, x2, y2) in bound_lst:
-            ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-', )
-
-        # plot background mask
-        bkgbound_lst = get_aperture_bound(tesscutimg.bkgmask)
-        for (x1, y1, x2, y2) in bkgbound_lst:
-            ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r--', lw=0.5)
-        ax1.grid(True, color='w', ls='--', lw=0.5)
-
-        # plot nearby stars
-        self.get_nearbystars(r=250)
-        mask = self.tictable['Tmag']<16
-        newtictable = self.tictable[mask]
-        #tictable['_r', 'TIC', 'RAJ2000', 'DEJ2000', 'Tmag'].pprint_all()
-        tmag_lst = newtictable['Tmag']
-        ra_lst  = newtictable['RAJ2000']
-        dec_lst = newtictable['DEJ2000']
-        x_lst, y_lst = tesscutimg.wcoord.all_world2pix(ra_lst, dec_lst, 0)
-        ax1.scatter(x_lst, y_lst, s=(16-tmag_lst)*20,
-                    c='none', ec='r', lw=1)
-
-        # adjust ax1
-        ax1.set_xlim(_x1, _x2)
-        ax1.set_ylim(_y1, _y2)
-        xcoords = ax1.coords[0]
-        ycoords = ax1.coords[1]
-        xcoords.set_major_formatter('d.ddd')
-        ycoords.set_major_formatter('d.ddd')
-        xcoords.set_axislabel('RA (deg)')
-        ycoords.set_axislabel('Dec (deg)')
-
-        # plot light curve
-        ax2.plot(self.t_lst, self.flux_lst, '-', c='C0', lw=0.6, alpha=1,
-                label='Flux')
-        ax2.plot(self.t_lst, self.bkg_lst, '-', c='C1', lw=0.6, alpha=1,
-                label='Background')
-        ax3.plot(self.t_lst, self.fluxcorr_lst, '-', lw=0.6, alpha=1,
-                label='Corrected Flux')
-        ax2.legend(loc='upper left')
-        ax3.legend()
-        fig.colorbar(cax, cax=axc)
-        fig.suptitle('TIC {}'.format(self.tic))
-        fig.savefig(figname)
-        plt.close(fig)
-
+            videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
+                    self.tic, sector, camera, ccd)
+            make_movie(self, tesscutimg, videoname)
+            
 
     def plot_lc(self, figname):
         t_lst = self.t_lst
@@ -335,24 +259,6 @@ class TessLightCurve(object):
         ax4.plot(t_lst, bcy_lst, '-', c='C1', lw=0.6, alpha=1)
         fig.savefig(figname)
         plt.close(fig)
-
-    def plot_image(self, figname):
-        wcoord = self.wcoord
-        t_lst = self.t_lst
-        fluxarray = self.fluxarray
-        flux_lst = self.flux_lst
-        bkg_lst  = self.bkg_lst
-        bcx_lst  = self.bcx_lst
-        bcy_lst  = self.bcy_lst
-        tictable = self.tictable
-        vmin = self.vmin
-        vmax = self.vmax
-        aperture = self.aperture
-        bkgmask = self.bkgmask
-        imin = self.imin
-
-        i = imin
-
 
     def plot_image2(self, tesscutimg, figname):
 
@@ -386,20 +292,24 @@ class TessLightCurve(object):
         xcoords.set_axislabel('RA (deg)')
         ycoords.set_axislabel('Dec (deg)')
 
+        # get sky image of nearby region
+        radius = max(self.xsize, self.ysize)*2*21  # in unit of arcsec
         paths = SkyView.get_images(position=self.coord, survey='DSS',
-                radius = 15/2*21*u.arcsec*3,
-                sampler='Clip',
+                radius  = radius*u.arcsec,
+                sampler ='Clip',
                 scaling = 'Log',
-                pixels = (400, 400),
+                pixels  = (400, 400),
                 )
         hdu = paths[0][0]
         data = hdu.data
         head = hdu.header
         wcoord2 = WCS(head)
-        ax2 = fig.add_axes([0.52, 0.10, 0.4, 0.8],
-                    projection=wcoord2)
+
+        # add another axes
+        ax2 = fig.add_axes([0.52, 0.10, 0.4, 0.8], projection=wcoord2)
         ax2.imshow(data, cmap='gray_r')
 
+        # plot pixel grid
         for iy in np.arange(-0.5, self.ysize, 1):
             x_lst = [-0.5, self.xsize-0.5]
             y_lst = [iy, iy]
@@ -413,6 +323,16 @@ class TessLightCurve(object):
             x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
             ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
 
+        # plot x and y arrows
+        for x_lst, y_lst in [([-1.0, +1.5], [-1.0, -1.0]),
+                             ([-1.0, -1.0], [-1.0, +1.5])]:
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            x, dx = x2_lst[0], x2_lst[1]-x2_lst[0]
+            y, dy = y2_lst[0], y2_lst[1]-y2_lst[0]
+            ax2.arrow(x,y,dx,dy,width=1,color='k', lw=0)
+
+
         #x_lst = [0, 0, self.xsize, self.xsize, 0]
         #y_lst = [0, self.ysize, self.ysize, 0, 0]
         xcoords = ax2.coords[0]
@@ -424,97 +344,4 @@ class TessLightCurve(object):
 
         fig.savefig(figname)
         plt.close(fig)
-
-
-
-    def make_animation(self, videoname):
-        n = self.n
-        ra = self.ra
-        dec = self.dec
-        t_lst = self.t_lst
-        fluxarray = self.fluxarray
-        flux_lst = self.flux_lst
-        bkg_lst  = self.bkg_lst
-        bcx_lst  = self.bcx_lst
-        bcy_lst  = self.bcy_lst
-        wcoord = self.wcoord
-        tictable = self.tictable
-        vmin = self.vmin
-        vmax = self.vmax
-        aperture = self.aperture
-        bkgmask = self.bkgmask
-
-        fluxbkg_lst = flux_lst - bkg_lst
-        
-        fig = plt.figure(figsize=(12, 5))
-
-        # initialize background mask
-        bkg_cmap = mcolors.LinearSegmentedColormap.from_list('TransRed',
-                   [(1,0,0,0), (1,0,0,0.1)], N=2)
-
-        def update(i):
-            fig.clf()
-            ax1 = fig.add_axes([0.1, 0.1, 0.4, 0.8], projection=wcoord)
-            ax2 = fig.add_axes([0.6, 0.6, 0.35, 0.35])
-            ax3 = fig.add_axes([0.6, 0.1, 0.35, 0.35])
-            axc = fig.add_axes([0.5, 0.1, 0.01, 0.8])
-            t = t_lst[i]
-            #mean_bkg  = mean_bkg_lst[i]
-            #fluximg_dbkg = fluximg - mean_bkg
-            #ax1.imshow(fluximg_dbkg, vmin=vmin-mean_bkg, vmax=vmax-mean_bkg)
-            cax = ax1.imshow(fluxarray[i], origin='lower',
-                    vmin=vmin, vmax=vmax, cmap='YlGnBu_r')
-            _x1, _x2 = ax1.get_xlim()
-            _y1, _y2 = ax1.get_ylim()
-
-            # plot aperture
-            bound_lst = get_aperture_bound(aperture)
-            for (x1, y1, x2, y2) in bound_lst:
-                ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-', )
-
-            # plot background mask
-            bkgbound_lst = get_aperture_bound(bkgmask)
-            for (x1, y1, x2, y2) in bkgbound_lst:
-                ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r--', lw=0.5)
-            ax1.grid(True, color='w', ls='--', lw=0.5)
-
-            # plot background mask
-            #ax1.imshow(bkgmask, interpolation='none', cmap=bkg_cmap)
-
-            # plot nearby stars
-            mask = tictable['Tmag']<16
-            newtictable = tictable[mask]
-            tmag_lst = newtictable['Tmag']
-            ra_lst  = newtictable['RAJ2000']
-            dec_lst = newtictable['DEJ2000']
-            x_lst, y_lst = wcoord.all_world2pix(ra_lst, dec_lst, 0)
-            ax1.scatter(x_lst, y_lst, s=(16-tmag_lst)*20,
-                        c='none', ec='r', lw=1)
-
-            # adjust ax1
-            ax1.set_xlim(_x1, _x2)
-            ax1.set_ylim(_y1, _y2)
-            xcoords = ax1.coords[0]
-            ycoords = ax1.coords[1]
-            xcoords.set_major_formatter('d.ddd')
-            ycoords.set_major_formatter('d.ddd')
-            xcoords.set_axislabel('RA (deg)')
-            ycoords.set_axislabel('Dec (deg)')
-   
-            # plot light curve
-            ax2.plot(t_lst, flux_lst, '-', lw=0.6, alpha=1)
-            ax2.plot(t, flux_lst[i], 'o', ms=4)
-            ax2.plot(t_lst, bkg_lst, '-', lw=0.6, alpha=1)
-            ax2.plot(t, bkg_lst[i], 'o', ms=4)
-    
-            ax3.plot(t_lst, fluxbkg_lst, '-', lw=0.6, alpha=1)
-            ax3.plot(t, fluxbkg_lst[i], 'o', ms=4)
-            fig.colorbar(cax, cax=axc)
-            fig.suptitle('t={:9.4f}'.format(t))
-            #fig.savefig('ani_{:04d}.png'.format(i))
-            print('{} of {}'.format(i, n))
-            return cax,
-        anim = animation.FuncAnimation(fig, update,
-                frames=np.arange(n), interval=1, blit=False)
-        anim.save(videoname, fps=25, extra_args=['-vcodec', 'libx264'])
 
