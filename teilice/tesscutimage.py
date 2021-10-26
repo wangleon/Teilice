@@ -1,3 +1,5 @@
+import re
+import os
 import numpy as np
 import astropy.io.fits as fits
 from astropy.wcs import WCS
@@ -5,6 +7,13 @@ from astropy.wcs import WCS
 class TesscutImage(object):
     def __init__(self, filename):
         self.filename = filename
+
+        pattern = 'tess\-s(\d{4})\-(\d)\-(\d)_[\d.]+_[\-\d.]+_\d+x\d+_astrocut\.fits'
+        mobj = re.match(pattern, os.path.basename(filename))
+        if mobj:
+            self.sector = int(mobj.group(1))
+            self.camera = int(mobj.group(2))
+            self.ccd    = int(mobj.group(3))
 
         hdulst = fits.open(filename)
         self.table = hdulst[1].data
@@ -17,8 +26,11 @@ class TesscutImage(object):
         self.ny, self.nx = self.table[0]['FLUX'].shape
         self.fluxarray = np.array([self.table[i]['FLUX']
                             for i in range(self.nsize)])
-        self.vmin = np.percentile(self.fluxarray, 10)
-        self.vmax = np.percentile(self.fluxarray, 95)
+        self.q_lst = np.array([self.table[i]['QUALITY']
+                            for i in range(self.nsize)])
+        m = (self.q_lst == 0)
+        self.vmin = np.percentile(self.fluxarray[m], 10)
+        self.vmax = np.percentile(self.fluxarray[m], 95)
 
         wcs_input_dict = {
             'CTYPE1': self.header1['1CTYP5'],
@@ -42,7 +54,9 @@ class TesscutImage(object):
 
     def plot_axes(self, axes, index):
         pass
+
     def set_aperture(self, aperture):
         self.aperture = aperture
+
     def set_bkgmask(self, bkgmask):
         self.bkgmask = bkgmask
