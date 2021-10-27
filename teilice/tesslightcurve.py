@@ -9,44 +9,16 @@ import astropy.io.fits as fits
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.wcs import WCS
-from astroquery.vizier import Vizier
 from astroquery.mast import Tesscut
 from astroquery.skyview import SkyView
 
 from .tesscutimage import TesscutImage
 from .aperture import Aperture
-from .visualize import Tesscut_LC, make_movie
+from .visual import Tesscut_LC, make_movie
 cache_path = os.path.expanduser('~/.teilice')
-
-
-def get_sourceinfo(tic):
-    catid = 'IV/38/tic'
-    tablelist = Vizier(catalog=catid, columns=['**'],
-                column_filters={'TIC': '={}'.format(tic)}
-                ).query_constraints()
-    tictable = tablelist[catid]
-    row = tictable[0]
-    return {'ra':   row['RAJ2000'],
-            'dec':  row['DEJ2000'],
-            'Tmag': row['Tmag'],
-            }
-
-def query_nearbystars(coord, r):
-    catid = 'IV/38/tic'
-    viz = Vizier(catalog=catid, columns=['**', '+_r'])
-    viz.ROW_LIMIT=-1
-    tablelist = viz.query_region(coord, radius=r*u.arcsec,
-                #column_filters={'Tmag': '<{}'.format(limit_mag)}
-                )
-    tictable = tablelist[catid]
-    return tictable
-    #filename = 'tic_nearby_{:011d}.vot'.format(tic)
-    #tictable.write(filename, format='votable', overwrite=True)
-
 
 class TessLightCurve(object):
 
-    nearby_path = os.path.join(cache_path, 'nearby')
     tesscut_path = os.path.join(cache_path, 'tesscut')
 
     def __init__(self, tic, xsize=15, ysize=15, aperture=None):
@@ -54,18 +26,9 @@ class TessLightCurve(object):
         # check existence of cache folders
         if not os.path.exists(cache_path):
             os.mkdir(cache_path)
-        if not os.path.exists(self.nearby_path):
-            os.mkdir(self.nearby_path)
         if not os.path.exists(self.tesscut_path):
             os.mkdir(self.tesscut_path)
 
-        # get star info
-        self.tic = tic
-        info = get_sourceinfo(tic)
-        self.ra = info['ra']
-        self.dec = info['dec']
-        self.tmag = info['Tmag']
-        self.coord = SkyCoord(self.ra, self.dec, unit='deg')
 
         self.xsize = xsize
         self.ysize = ysize
@@ -110,37 +73,10 @@ class TessLightCurve(object):
                 size=(self.ysize, self.xsize), path=self.tesscut_path,
                 inflate=True)
 
-
-    def get_nearbystars(self, r=250):
-        r = math.ceil(r)
-        found_cache = False
-
-        if not os.path.exists(self.nearby_path):
-            os.mkdir(self.nearby_path)
-
-        for fname in os.listdir(self.nearby_path):
-            mobj = re.match('tic_nearby_(\d+)_r(\d+)s\.vot', fname)
-            if mobj:
-                _tic = int(mobj.group(1))
-                _r   = int(mobj.group(2))
-                if _tic==self.tic and _r==r:
-                    found_cache = True
-                    break
-        if found_cache:
-            filename = os.path.join(self.nearby_path, fname)
-            tictable = Table.read(filename)
-        else:
-            tictable = query_nearbystars(self.coord, r)
-            fname = 'tic_nearby_{:011d}_r{:d}s.vot'.format(self.tic, r)
-            filename = os.path.join(self.nearby_path, fname)
-            tictable.write(filename, format='votable', overwrite=True)
-
-        self.tictable = tictable
-
     def apply_aperture(self, tesscutimg):
         x, y = tesscutimg.wcoord.all_world2pix([self.ra], [self.dec], 0)
-        x0 = int(x)+1
-        y0 = int(y)+1
+        x0 = round(x[0])
+        y0 = round(y[0])
         self.aperture_mask = np.zeros((tesscutimg.ny, tesscutimg.nx))
         cy = self.aperture.center[0]
         cx = self.aperture.center[1]
@@ -152,6 +88,16 @@ class TessLightCurve(object):
 
     def get_lc(self):
 
+        self.sector_lst = []
+        self.t_lst = {}
+        self.q_lst = {}
+        self.flux_lst = {}
+        self.bkg_lst = {}
+        self.bcx_lst = {}
+        self.bcy_lst = {}
+        self.fluxcorr_lst = {}
+        self.tesscutimg_lst = {}
+
         # get tesscutfile
         filename_lst = self.get_tesscutfile()
         if len(filename_lst)==0:
@@ -160,6 +106,7 @@ class TessLightCurve(object):
 
         for filename, sector, camera, ccd in filename_lst:
             tesscutimg = TesscutImage(filename)
+            self.tesscutimg_lst[sector] = tesscutimg
             self.apply_aperture(tesscutimg)
 
             # set photometric aperture
@@ -195,15 +142,25 @@ class TessLightCurve(object):
                 bkg_lst.append(bkg)
                 bcx_lst.append(bcx)
                 bcy_lst.append(bcy)
-    
-            self.t_lst = np.array(t_lst)
-            self.q_lst = np.array(q_lst)
-            self.flux_lst = np.array(flux_lst)
-            self.bkg_lst  = np.array(bkg_lst)
-            self.bcx_lst  = np.array(bcx_lst)
-            self.bcy_lst  = np.array(bcy_lst)
-            self.fluxcorr_lst = self.flux_lst - self.bkg_lst
 
+            self.sector_lst.append(sector)
+            self.t_lst[sector] = np.array(t_lst)
+            self.q_lst[sector] = np.array(q_lst)
+            self.flux_lst[sector] = np.array(flux_lst)
+            self.bkg_lst[sector]  = np.array(bkg_lst)
+            self.bcx_lst[sector]  = np.array(bcx_lst)
+            self.bcy_lst[sector]  = np.array(bcy_lst)
+            self.fluxcorr_lst[sector] = np.array(flux_lst) - np.array(bkg_lst)
+
+
+
+            #videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
+            #        self.tic, sector, camera, ccd)
+            #make_movie(self, tesscutimg, videoname)
+
+    def save_lc(self):
+        for sector in self.sector_lst:
+            '''
             lc_table = Table(dtype=[
                     ('TIME',        '<f4'),
                     ('QUALITY',     '<i4'),
@@ -213,6 +170,18 @@ class TessLightCurve(object):
                     ('BCX',         '<f4'),
                     ('BCY',         '<f4'),
                     ])
+            '''
+
+            lc_table = Table()
+            lc_table.add_column(self.t_lst[sector], name='TIME')
+            lc_table.add_column(self.q_lst[sector], name='QUALITY')
+            lc_table.add_column(self.flux_lst[sector], name='FLUX_RAW')
+            lc_table.add_column(self.bkg_lst[secctor], name='BKG')
+            lc_table.add_column(self.fluxcorr_lst[sector], name='FLUX_CORR')
+            lc_table.add_column(self.bcx_lst[sector], name='BCX')
+            lc_table.add_column(self.bcy_lst[sector], name='BCY')
+
+            '''
             for t, q, f, b, fc, cx, cy in zip(
                     self.t_lst,
                     self.q_lst,
@@ -222,6 +191,7 @@ class TessLightCurve(object):
                     self.bcx_lst,
                     self.bcy_lst):
                 lc_table.add_row((t, q, f, b, fc, cx, cy))
+            '''
             hdulst = fits.HDUList([
                         fits.PrimaryHDU(),
                         fits.BinTableHDU(data=lc_table),
@@ -230,15 +200,12 @@ class TessLightCurve(object):
                         self.tic, sector, camera, ccd)
             hdulst.writeto(outfilename, overwrite=True)
 
-            fig = Tesscut_LC(self, tesscutimg, figsize=(12, 5), dpi=200)
-            figname = 'tesscut_{:011d}_s{:04d}_{}_{}.png'.format(
-                        self.tic, sector, camera, ccd)
+    def plot_tesscut_lc(self):
+        for sector in self.sector_lst:
+            fig = Tesscut_LC(self, figsize=(12, 5), dpi=200, sector=sector)
+            figname = 'tesscut_{:011d}_s{:04d}.png'.format(
+                        self.tic, sector)
             fig.savefig(figname)
-
-            videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
-                    self.tic, sector, camera, ccd)
-            make_movie(self, tesscutimg, videoname)
-            
 
     def plot_lc(self, figname):
         t_lst = self.t_lst
