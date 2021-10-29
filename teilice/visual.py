@@ -38,6 +38,7 @@ class Tesscut_LC(Figure):
         Figure.__init__(self, *args, **kwargs)
         self.canvas = FigureCanvasAgg(self)
 
+        tesscutimg = tesslc.tesscutimg
         ax1 = self.add_axes([0.08, 0.10, 0.40, 0.80],
                     projection=tesscutimg.wcoord)
         ax2 = self.add_axes([0.58, 0.55, 0.37, 0.35])
@@ -65,9 +66,9 @@ class Tesscut_LC(Figure):
         ax1.grid(True, color='w', ls='--', lw=0.5)
 
         # plot nearby stars
-        tesslc.get_nearbystars(r=250)
-        mask = tesslc.tictable['Tmag']<16
-        newtictable = tesslc.tictable[mask]
+        tictable = tesslc.target.tictable
+        mask = tictable['Tmag']<16
+        newtictable = tictable[mask]
         tmag_lst = newtictable['Tmag']
         ra_lst  = newtictable['RAJ2000']
         dec_lst = newtictable['DEJ2000']
@@ -100,8 +101,8 @@ class Tesscut_LC(Figure):
         ax2.set_xlim(tesslc.t_lst[m][0], tesslc.t_lst[m][-1])
         ax3.set_xlim(tesslc.t_lst[m][0], tesslc.t_lst[m][-1])
         self.suptitle('TIC {} (RA={:9.5f}, Dec={:+9.5f}, Tmag={:.2f}) Sector {}'.format(
-                tesslc.tic, tesslc.ra, tesslc.dec, tesslc.tmag,
-                tesscutimg.sector))
+                tesslc.target.tic, tesslc.target.ra, tesslc.target.dec, tesslc.target.tmag,
+                tesslc.sector))
 
     def close(self):
         plt.close(self)
