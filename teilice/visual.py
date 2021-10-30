@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 import matplotlib.animation as animation
+import matplotlib.ticker as tck
 
 
 def find_best_bc(bcx_lst, bcy_lst):
@@ -39,11 +40,12 @@ class Tesscut_LC(Figure):
         self.canvas = FigureCanvasAgg(self)
 
         tesscutimg = tesslc.tesscutimg
-        ax1 = self.add_axes([0.08, 0.10, 0.40, 0.80],
+        ax1 = self.add_axes([0.06, 0.10, 0.40, 0.80],
                     projection=tesscutimg.wcoord)
-        ax2 = self.add_axes([0.58, 0.55, 0.37, 0.35])
-        ax3 = self.add_axes([0.58, 0.10, 0.37, 0.35])
-        axc = self.add_axes([0.47, 0.10, 0.01, 0.80])
+        ax2 = self.add_axes([0.58, 0.66, 0.38, 0.23])
+        ax3 = self.add_axes([0.58, 0.38, 0.38, 0.23])
+        ax4 = self.add_axes([0.58, 0.10, 0.38, 0.23])
+        axc = self.add_axes([0.45, 0.10, 0.01, 0.80])
 
         m = tesslc.q_lst==0
         i = find_best_bc(tesslc.bcx_lst[m], tesslc.bcy_lst[m])
@@ -95,11 +97,26 @@ class Tesscut_LC(Figure):
                 lw=0.6, alpha=1, label='Background')
         ax3.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], '-', c='C2',
                 lw=0.6, alpha=1, label='Corrected Flux')
+
+        # plot barycenter movement
+        ax4.plot(tesslc.t_lst[m], tesslc.bcx_lst[m], '-', c='C0',
+                lw=0.6, alpha=1)
+        ax4.plot(tesslc.t_lst[m], tesslc.bcy_lst[m], '-', c='C1',
+                lw=0.6, alpha=1)
         #ax2.legend(loc='upper left')
         #ax3.legend()
-        # adjust pixel range
-        ax2.set_xlim(tesslc.t_lst[m][0], tesslc.t_lst[m][-1])
-        ax3.set_xlim(tesslc.t_lst[m][0], tesslc.t_lst[m][-1])
+
+        # adjust ticks
+        for ax in [ax2, ax3, ax4]:
+            ax.set_xlim(tesslc.t_lst[m][0], tesslc.t_lst[m][-1])
+            ax.xaxis.set_major_locator(tck.MultipleLocator(5))
+            ax.xaxis.set_minor_locator(tck.MultipleLocator(1))
+
+        ax2.set_ylabel('Flux and Background')
+        ax3.set_ylabel('Corrected Flux')
+        ax4.set_ylabel('Barycenter')
+        ax4.set_xlabel('Time (BJD-2457000)')
+
         self.suptitle('TIC {} (RA={:9.5f}, Dec={:+9.5f}, Tmag={:.2f}) Sector {}'.format(
                 tesslc.target.tic, tesslc.target.ra, tesslc.target.dec, tesslc.target.tmag,
                 tesslc.sector))
