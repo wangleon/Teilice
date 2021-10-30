@@ -34,6 +34,10 @@ class TessLightCurve(object):
         x, y = tesscutimg.wcoord.all_world2pix(ra_lst, dec_lst, 0)
         x0 = round(x[0])
         y0 = round(y[0])
+
+        # set the aperture center
+        self.aperture_center = (y0, x0)
+
         self.aperture_mask = np.zeros((tesscutimg.ny, tesscutimg.nx))
         cy = self.aperture.center[0]
         cx = self.aperture.center[1]
@@ -52,8 +56,12 @@ class TessLightCurve(object):
                                 ysize  = self.ysize,
                                 )
         if filename is None:
-            self.target.download_tesscut(self.sector)
-            filename, camera, ccd = self.target.get_tesscutfile(self.sector)
+            self.target.download_tesscut(self.sector, self.xsize, self.ysize)
+            filename, camera, ccd = self.target.get_tesscutfile(
+                                    sector = self.sector,
+                                    xsize  = self.xsize,
+                                    ysize  = self.ysize,
+                                    )
 
         self.camera = camera
         self.ccd    = ccd
@@ -98,8 +106,8 @@ class TessLightCurve(object):
         self.q_lst = np.array(q_lst)
         self.flux_lst = np.array(flux_lst)
         self.bkg_lst  = np.array(bkg_lst)
-        self.bcx_lst  = np.array(bcx_lst)
-        self.bcy_lst  = np.array(bcy_lst)
+        self.bcx_lst  = np.array(bcx_lst) - self.aperture_center[1]
+        self.bcy_lst  = np.array(bcy_lst) - self.aperture_center[0]
         self.fluxcorr_lst = self.flux_lst - self.bkg_lst
 
         #videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
