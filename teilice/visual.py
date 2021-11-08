@@ -7,6 +7,10 @@ from matplotlib.figure import Figure
 import matplotlib.animation as animation
 import matplotlib.ticker as tck
 
+import astropy.units as u
+from astropy.wcs import WCS
+from astroquery.skyview import SkyView
+
 
 def find_best_bc(bcx_lst, bcy_lst):
     bcx_med = np.median(bcx_lst)
@@ -35,7 +39,7 @@ def get_aperture_bound(aperture):
 
 
 class Tesscut_LC(Figure):
-    def __init__(self, tesslc, sector, *args, **kwargs):
+    def __init__(self, tesslc, *args, **kwargs):
         Figure.__init__(self, *args, **kwargs)
         self.canvas = FigureCanvasAgg(self)
 
@@ -117,12 +121,178 @@ class Tesscut_LC(Figure):
         ax4.set_ylabel('Barycenter')
         ax4.set_xlabel('Time (BJD-2457000)')
 
-        self.suptitle('TIC {} (RA={:9.5f}, Dec={:+9.5f}, Tmag={:.2f}) Sector {}'.format(
-                tesslc.target.tic, tesslc.target.ra, tesslc.target.dec, tesslc.target.tmag,
-                tesslc.sector))
+        title = ('TIC {0.tic}'
+                 ' (RA={0.ra:9.5f}, Dec={0.dec:+9.5f}, Tmag={0.tmag:.2f})'
+                 ' Sector {1.sector}').format(tesslc.target, tesslc)
+        self.suptitle(title)
 
     def close(self):
         plt.close(self)
+
+class Tesscut_Skyview(Figure):
+
+    def __init__(self, tesslc, *args, **kwargs):
+        Figure.__init__(self, *args, **kwargs)
+        self.canvas = FigureCanvasAgg(self)
+
+        tesscutimg = tesslc.tesscutimg
+        ax1 = self.add_axes([0.06, 0.10, 0.40, 0.80],
+                    projection=tesscutimg.wcoord)
+
+        m = tesslc.q_lst==0
+        i = find_best_bc(tesslc.bcx_lst[m], tesslc.bcy_lst[m])
+
+        cax = ax1.imshow(tesscutimg.fluxarray[m][i],
+                vmin=tesscutimg.vmin, vmax=tesscutimg.vmax, cmap='YlGnBu_r')
+        _x1, _x2 = ax1.get_xlim()
+        _y1, _y2 = ax1.get_ylim()
+
+        # plot aperture
+        bound_lst = get_aperture_bound(tesscutimg.aperture)
+        for (x1, y1, x2, y2) in bound_lst:
+            ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-')
+
+        # plot background mask
+        bkgbound_lst = get_aperture_bound(tesscutimg.bkgmask)
+        for (x1, y1, x2, y2) in bkgbound_lst:
+            ax1.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r--', lw=0.5)
+
+        ax1.grid(True, color='w', ls='--', lw=0.5)
+
+        # plot nearby stars
+        tictable = tesslc.target.tictable
+        mask = tictable['Tmag']<16
+        newtictable = tictable[mask]
+        tmag_lst = newtictable['Tmag']
+        ra_lst  = newtictable['RAJ2000']
+        dec_lst = newtictable['DEJ2000']
+        x_lst, y_lst = tesscutimg.wcoord.all_world2pix(ra_lst, dec_lst, 0)
+        ax1.scatter(x_lst, y_lst, s=(16-tmag_lst)*20,
+                    c='none', ec='r', lw=1)
+
+        # adjust ax1
+        ax1.set_xlim(_x1, _x2)
+        ax1.set_ylim(_y1, _y2)
+        xcoords = ax1.coords[0]
+        ycoords = ax1.coords[1]
+        xcoords.set_major_formatter('d.ddd')
+        ycoords.set_major_formatter('d.ddd')
+        xcoords.set_axislabel('RA (deg)')
+        ycoords.set_axislabel('Dec (deg)')
+
+        # get sky image of nearby region
+        radius = max(tesslc.xsize, tesslc.ysize)*2*21  # in unit of arcsec
+        paths = SkyView.get_images(position=tesslc.target.coord, survey='DSS',
+                radius  = radius*u.arcsec,
+                sampler ='Clip',
+                scaling = 'Log',
+                pixels  = (400, 400),
+                )
+        hdu = paths[0][0]
+        data = hdu.data
+        head = hdu.header
+        wcoord2 = WCS(head)
+
+
+        # add another axes
+        ax2 = self.add_axes([0.55, 0.10, 0.40, 0.80],
+                            projection=wcoord2)
+        ax2.imshow(data, cmap='gray_r')
+
+        # plot pixel grid
+        for iy in np.arange(-0.5, tesslc.ysize, 1):
+            x_lst = [-0.5, tesslc.xsize-0.5]
+            y_lst = [iy, iy]
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
+        for ix in np.arange(-0.5, tesslc.xsize, 1):
+            x_lst = [ix, ix]
+            y_lst = [-0.5, tesslc.ysize-0.5]
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
+
+        # plot aperture
+        bound_lst = get_aperture_bound(tesscutimg.aperture)
+        for (x1, y1, x2, y2) in bound_lst:
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(
+                    [x1-0.5,x2-0.5], [y1-0.5,y2-0.5], 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            ax2.plot(x2_lst, y2_lst,  'r-', lw=0.7)
+
+
+        # plot x and y arrows
+        for x_lst, y_lst in [([-1.0, +1.5], [-1.0, -1.0]),
+                             ([-1.0, -1.0], [-1.0, +1.5])]:
+            ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
+            x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            x, dx = x2_lst[0], x2_lst[1]-x2_lst[0]
+            y, dy = y2_lst[0], y2_lst[1]-y2_lst[0]
+            ax2.arrow(x,y,dx,dy,width=1,color='k', lw=0)
+
+        xcoords = ax2.coords[0]
+        ycoords = ax2.coords[1]
+        xcoords.set_major_formatter('d.ddd')
+        ycoords.set_major_formatter('d.ddd')
+        xcoords.set_axislabel('RA (deg)')
+        ycoords.set_axislabel('Dec (deg)')
+
+        title = ('TIC {0.tic}'
+                 ' (RA={0.ra:9.5f}, Dec={0.dec:+9.5f}, Tmag={0.tmag:.2f})'
+                 ' Sector {1.sector}').format(tesslc.target, tesslc)
+        self.suptitle(title)
+
+    def close(self):
+        plt.close(self)
+
+class LC_PDM(Figure):
+    def __init__(self, tesslc, *args, **kwargs):
+        Figure.__init__(self, *args, **kwargs)
+        self.canvas = FigureCanvasAgg(self)
+        ax1 = self.add_axes([0.08, 0.52, 0.84, 0.40])
+        ax2 = self.add_axes([0.08, 0.10, 0.30, 0.32])
+
+        m = tesslc.q_lst==0
+        ax1.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], '-', c='C0',
+                lw=0.8, alpha=1)
+        ax1.set_xlabel('Time (BJD-2457000)')
+        ax1.set_ylabel('Flux')
+        ax1.grid(True, ls='--')
+        ax1.set_axisbelow(True)
+        ax1.set_xlim(tesslc.t_lst[m][0], tesslc.t_lst[m][-1])
+        ax1.xaxis.set_major_locator(tck.MultipleLocator(5))
+        ax1.xaxis.set_minor_locator(tck.MultipleLocator(1))
+
+        meanf = tesslc.fluxcorr_lst[m].mean()
+        y1, y2 = ax1.get_ylim()
+        yy1 = y1/meanf
+        yy2 = y2/meanf
+        ax1c = ax1.twinx()
+        ax1c.set_ylim(yy1, yy2)
+
+        tesslc.get_pdm()
+        period_lst = np.logspace(-3, 1, 1000)
+        power_lst, winpower_lst = tesslc.pdm.get_power(period=period_lst)
+        freq_lst = 1/period_lst
+        ax2.plot(freq_lst, power_lst, '-', c='C0', lw=0.8, alpha=1)
+        ax2.set_xscale('log')
+        ax2.set_yscale('log')
+        #ax2.set_xlim(freq_lst[0], freq_lst[-1])
+        ax2.set_xlim(0.1, 1000)
+        ax2.set_xlabel('Freq (c/d)')
+        ax2.set_ylabel('Power')
+        ax2.grid(True, ls='--')
+        ax2.set_axisbelow(True)
+
+        title = ('TIC {0.tic}'
+                 ' (RA={0.ra:9.5f}, Dec={0.dec:+9.5f}, Tmag={0.tmag:.2f})'
+                 ' Sector {1.sector}').format(tesslc.target, tesslc)
+        self.suptitle(title)
+
+    def close(self):
+        plt.close(self)
+
 
 def make_movie(tesslc, tesscutimg, videoname):
 
