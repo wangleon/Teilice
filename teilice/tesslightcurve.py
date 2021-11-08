@@ -10,11 +10,11 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astropy.wcs import WCS
 from astroquery.mast import Tesscut
-from astroquery.skyview import SkyView
 
 from .tesscutimage import TesscutImage
 from .aperture import Aperture
-from .visual import Tesscut_LC, make_movie
+from .visual import Tesscut_LC, Tesscut_Skyview, LC_PDM, make_movie
+from .periodogram import GLS
 
 class TessLightCurve(object):
 
@@ -114,6 +114,10 @@ class TessLightCurve(object):
         #        self.tic, sector, camera, ccd)
         #make_movie(self, tesscutimg, videoname)
 
+    def get_pdm(self):
+        m = self.q_lst==0
+        self.pdm = GLS(self.t_lst[m], self.fluxcorr_lst[m])
+
     def save_fits(self, filename):
 
         lc_table = Table()
@@ -131,10 +135,33 @@ class TessLightCurve(object):
                     ])
         hdulst.writeto(filename, overwrite=True)
 
-    def plot_tesscut_lc(self, figname):
-        fig = Tesscut_LC(self, figsize=(12, 5), dpi=200, sector=self.sector)
+    def plot_tesscut_lc(self, figname=None):
+        if figname is None:
+            figname = 'tesscut_{:011d}_s{:04d}.png'.format(
+                        self.target.tic, self.sector)
+
+        fig = Tesscut_LC(self, figsize=(12, 5), dpi=200)
         fig.savefig(figname)
         fig.close()
+
+    def plot_tesscut_skyview(self, figname=None):
+        if figname is None:
+            figname = 'tesscut_skyview_{:011d}_s{:04d}.png'.format(
+                        self.target.tic, self.sector)
+
+        fig = Tesscut_Skyview(self, figsize=(12, 5), dpi=200)
+        fig.savefig(figname)
+        fig.close()
+
+    def plot_lc_pdm(self, figname=None):
+        if figname is None:
+            figname = 'tesslc_pdm_{:011d}_s{:04d}.png'.format(
+                        self.target.tic, self.sector)
+
+        fig = LC_PDM(self, figsize=(12, 6), dpi=200)
+        fig.savefig(figname)
+        fig.close()
+
 
     def plot_lc(self, figname):
 
