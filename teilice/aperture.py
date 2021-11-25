@@ -3,6 +3,12 @@ import numpy as np
 class Aperture(object):
     def __init__(self, name):
         self.name = name
+        if name=='1x1':
+            self.shape = (1, 1)
+            self.data = np.array([
+                [1],
+                ])
+            self.center = (0, 0)
         if name=='3x3':
             self.shape = (3, 3)
             self.data = np.array([
