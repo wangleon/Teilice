@@ -108,20 +108,21 @@ class TessTarget(object):
 
         return (None, None, None)
 
-    def download_tesscut(self, sector, xsize, ysize):
-        #website = 'https://mast.stsci.edu/tesscut'
-        #url = '{}/api/v0.1/astrocut?ra={}&dec={}&y={}&x={}'.format(
-        #        website, self.ra, self.dec, self.ysize, self.xsize)
-        #outfile = 'tesscut_tic{:011d}_{}x{}.zip'.format(
-        #        self.tic, self.xsize, self.ysize)
-        #outfilename = os.path.join(self.tesscut_path, outfile)
-        ##command = 'wget -O {} --content-disposition "{}"'.format(outfilename, url)
-        #command = 'wget --content-disposition "{}"'.format(url)
-        #os.system(command)
-        #command = 'unzip {} -d {}'.format(outfilename, self.tesscut_path)
-        #os.system(command)
-        Tesscut.download_cutouts(coordinates=self.coord,
-                sector=sector,
-                size=(ysize, xsize), path=TESSCUT_PATH,
-                inflate=True)
-
+    def download_tesscut(self, sector, xsize, ysize, method='wget'):
+        if method == 'wget':
+            website = 'https://mast.stsci.edu/tesscut'
+            url = '{}/api/v0.1/astrocut?ra={}&dec={}&y={}&x={}'.format(
+                    website, self.ra, self.dec, ysize, xsize)
+            outfile = 'tesscut_tic{:011d}_{}x{}.zip'.format(
+                    self.tic, xsize, ysize)
+            outfilename = os.path.join(TESSCUT_PATH, outfile)
+            command = 'wget -O {} --content-disposition "{}"'.format(outfilename, url)
+            os.system(command)
+            command = 'unzip {} -d {}'.format(outfilename, TESSCUT_PATH)
+            os.system(command)
+            os.remove(outfilename)
+        elif method == 'tesscut':
+            Tesscut.download_cutouts(coordinates=self.coord, sector=sector,
+                    size=(ysize, xsize), path=TESSCUT_PATH, inflate=True)
+        else:
+            raise ValueError
