@@ -1,5 +1,6 @@
 import os
 import sys
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -95,18 +96,18 @@ class Tesscut_LC(Figure):
         self.colorbar(cax, cax=axc)
 
         # plot light curve
-        ax2.plot(tesslc.t_lst[m], tesslc.flux_lst[m], '-', c='C0',
-                lw=0.6, alpha=1, label='Flux')
-        ax2.plot(tesslc.t_lst[m], tesslc.bkg_lst[m], '-', c='C1',
-                lw=0.6, alpha=1, label='Background')
-        ax3.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], '-', c='C2',
-                lw=0.6, alpha=1, label='Corrected Flux')
+        ax2.plot(tesslc.t_lst[m], tesslc.flux_lst[m], 'o', c='C0',
+                ms=1, mew=0, alpha=0.6, label='Flux')
+        ax2.plot(tesslc.t_lst[m], tesslc.bkg_lst[m], 'o', c='C1',
+                ms=1, mew=0, alpha=0.6, label='Background')
+        ax3.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], 'o', c='C2',
+                ms=1, mew=0, alpha=0.6, label='Corrected Flux')
 
         # plot barycenter movement
-        ax4.plot(tesslc.t_lst[m], tesslc.bcx_lst[m], '-', c='C0',
-                lw=0.6, alpha=1)
-        ax4.plot(tesslc.t_lst[m], tesslc.bcy_lst[m], '-', c='C1',
-                lw=0.6, alpha=1)
+        ax4.plot(tesslc.t_lst[m], tesslc.bcx_lst[m], 'o', c='C0',
+                ms=0.5, mew=0, alpha=0.6)
+        ax4.plot(tesslc.t_lst[m], tesslc.bcy_lst[m], 'o', c='C1',
+                ms=0.5, mew=0, alpha=0.6)
         #ax2.legend(loc='upper left')
         #ax3.legend()
 
@@ -254,8 +255,8 @@ class LC_PDM(Figure):
         ax2 = self.add_axes([0.08, 0.10, 0.30, 0.32])
 
         m = tesslc.q_lst==0
-        ax1.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], '-', c='C0',
-                lw=0.8, alpha=1)
+        ax1.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], 'o', c='C0',
+                ms=2, mew=0, alpha=0.8)
         ax1.set_xlabel('Time (BJD-2457000)')
         ax1.set_ylabel('Flux')
         ax1.grid(True, ls='--')
@@ -271,15 +272,25 @@ class LC_PDM(Figure):
         ax1c = ax1.twinx()
         ax1c.set_ylim(yy1, yy2)
 
+        # calculte GLS periodogram
         tesslc.get_pdm()
         period_lst = np.logspace(-3, 1, 1000)
         power_lst, winpower_lst = tesslc.pdm.get_power(period=period_lst)
         freq_lst = 1/period_lst
+        # plot periodogram
         ax2.plot(freq_lst, power_lst, '-', c='C0', lw=0.8, alpha=1)
         ax2.set_xscale('log')
         ax2.set_yscale('log')
+        _x1, _x2 = 1e-1, 1e3
+        _y1, _y2 = ax2.get_ylim()
+        # plot cadence
+        ax2.axvline(24*60/tesslc.cadence, c='k', ls='--', lw=0.5)
+        ax2.text(10**(0.95*math.log10(_x1)+0.05*math.log10(_x2)),
+                10**(0.1*math.log10(_y1)+0.9*math.log10(_y2)),
+                'cadence={}min'.format(tesslc.cadence))
+        # adjust axes
         #ax2.set_xlim(freq_lst[0], freq_lst[-1])
-        ax2.set_xlim(0.1, 1000)
+        ax2.set_xlim(_x1, _x2)
         ax2.set_xlabel('Freq (c/d)')
         ax2.set_ylabel('Power')
         ax2.grid(True, ls='--')
