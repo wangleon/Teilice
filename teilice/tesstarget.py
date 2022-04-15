@@ -10,6 +10,12 @@ from astroquery.mast import Tesscut
 from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH
 
 def get_sourceinfo(tic):
+    """Get basic information of input TIC target.
+
+    Args:
+        tic (int): TIC number.
+
+    """
     catid = 'IV/38/tic'
     tablelist = Vizier(catalog=catid, columns=['**'],
                 column_filters={'TIC': '={}'.format(tic)}
@@ -22,6 +28,16 @@ def get_sourceinfo(tic):
             }
 
 def query_nearbystars(coord, r):
+    """Query the nearby TIC objects around a given coordinate.
+
+    Args:
+        coord (astropy.coordinates.SkyCoord): Astropy object of sky coordinate.
+        r (float): radius in unti of arcsec.
+
+    Returns:
+        astropy.table.Table
+
+    """
     catid = 'IV/38/tic'
     viz = Vizier(catalog=catid, columns=['**', '+_r'])
     viz.ROW_LIMIT=-1
@@ -53,12 +69,18 @@ class TessTarget(object):
         self.get_nearbystars()
 
     def get_nearbystars(self, r=250):
+        """Query nearby stars within given radius.
+
+        Args:
+            r (int): radius of searching region.
+        """
         r = math.ceil(r)
         found_cache = False
 
         if not os.path.exists(NEARBY_PATH):
             os.mkdir(NEARBY_PATH)
 
+        # check if the target has already in the cache
         for fname in os.listdir(NEARBY_PATH):
             mobj = re.match('tic_nearby_(\d+)_r(\d+)s\.vot', fname)
             if mobj:
@@ -68,9 +90,11 @@ class TessTarget(object):
                     found_cache = True
                     break
         if found_cache:
+            # nearby stars already in cache
             filename = os.path.join(NEARBY_PATH, fname)
             tictable = Table.read(filename)
         else:
+            # nearby stars not in cache
             tictable = query_nearbystars(self.coord, r)
             fname = 'tic_nearby_{:011d}_r{:d}s.vot'.format(self.tic, r)
             filename = os.path.join(NEARBY_PATH, fname)
@@ -79,6 +103,8 @@ class TessTarget(object):
         self.tictable = tictable
 
     def get_sectors(self):
+        """Get the observed sectors of target.
+        """
         sector_table = Tesscut.get_sectors(coordinates=self.coord)
         return list(sector_table['sector'])
 
@@ -109,6 +135,15 @@ class TessTarget(object):
         return (None, None, None)
 
     def download_tesscut(self, sector, xsize, ysize, method='wget'):
+        """Download the tesscut images in a given sector and x/y sizes.
+        
+        Args:
+            sector (int):
+            xsize (int):
+            ysize (int):
+            method (str): Method of file downloading. Options include 'wget',
+                and 'tesscut'.
+        """
         if method == 'wget':
             website = 'https://mast.stsci.edu/tesscut'
             url = '{}/api/v0.1/astrocut?ra={}&dec={}&y={}&x={}'.format(
