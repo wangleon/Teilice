@@ -47,7 +47,7 @@ class TessLightCurve(object):
             for ix in np.arange(self.aperture.shape[1]):
                 self.aperture_mask[y0+iy-cy, x0+ix-cx] = self.aperture.data[iy, ix]
 
-    def get_lc(self):
+    def get_lc(self, tesscut_path=None):
         """Get light curve.
         """
 
@@ -56,15 +56,18 @@ class TessLightCurve(object):
                                 sector = self.sector,
                                 xsize  = self.xsize,
                                 ysize  = self.ysize,
+                                tesscut_path = tesscut_path,
                                 )
         if filename is None:
             # tesscut file is not in cache and need to be downloaded from MAST
             # archive
-            self.target.download_tesscut(self.sector, self.xsize, self.ysize)
+            self.target.download_tesscut(self.sector, self.xsize, self.ysize,
+                                tesscut_path=tesscut_path)
             filename, camera, ccd = self.target.get_tesscutfile(
                                     sector = self.sector,
                                     xsize  = self.xsize,
                                     ysize  = self.ysize,
+                                    tesscut_path = tesscut_path,
                                     )
 
         self.camera = camera
