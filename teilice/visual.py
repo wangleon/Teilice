@@ -1,6 +1,7 @@
 import os
 import sys
 import math
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -8,10 +9,12 @@ from matplotlib.figure import Figure
 import matplotlib.animation as animation
 import matplotlib.ticker as tck
 
+from astropy.coordinates import SkyCoord
 import astropy.units as u
 from astropy.wcs import WCS
 from astroquery.skyview import SkyView
 
+from . import periodogram
 
 def find_best_bc(bcx_lst, bcy_lst):
     bcx_med = np.median(bcx_lst)
@@ -407,3 +410,245 @@ def make_movie(tesslc, tesscutimg, videoname):
 
     anim.save(videoname, fps=25, extra_args=['-vcodec', 'libx264'])
     print(' \033[92m Completed\033[0m')
+
+
+class MultiSector_LC(Figure):
+
+    def __init__(self, lc_lst, *args, **kwargs):
+        Figure.__init__(self, *args, **kwargs)
+        self.canvas = FigureCanvasAgg(self)
+
+        #def multi_lc(tic, lc_lst, ticrow, gaiarow, figname, include_gls=False):
+
+        #fig1 = plt.figure(figsize=(18, 8), dpi=200)
+        axlc_lst = []
+
+        segment_lst = []
+        sector_lst = sorted(lc_lst.keys())
+        segment_lst = np.split(sector_lst, np.where(np.diff(sector_lst) != 1)[0]+1)
+
+        foffset_lst = {}
+        for isector, (sector, dataitem) in enumerate(sorted(lc_lst.items())):
+            t_lst, f_lst = dataitem
+            medf = np.median(f_lst)
+            if isector == 0:
+                medf0 = medf
+            foffset = (medf - medf0)
+            foffset_lst[sector] = foffset
+
+        tspan_lst = []
+        for segs in segment_lst:
+            s1 = segs[0]
+            s2 = segs[-1]
+            t1 = lc_lst[s1][0][0]
+            t2 = lc_lst[s2][0][-1]
+            tspan_lst.append(t2-t1)
+        tspan_lst = np.array(tspan_lst)
+
+        gap = 0.008
+        width_lst = np.array([(0.88 - (len(segment_lst)-1)*gap)/tspan_lst.sum()*tspan
+                        for tspan in tspan_lst])
+
+        for iseg, segs in enumerate(segment_lst):
+            _left = 0.07 + width_lst[0:iseg].sum() + iseg*gap
+            _width = width_lst[iseg]
+            ax = self.add_axes([_left, 0.5, _width, 0.43])
+            axlc_lst.append(ax)
+            for sector in segs:
+                color = 'C{}'.format(sector%10)
+                t_lst, f_lst = lc_lst[sector]
+                foffset = foffset_lst[sector]
+                ax.plot(t_lst, f_lst - foffset, 'o', color='C0', ms=1, alpha=0.5)
+            s1 = segs[0]
+            s2 = segs[-1]
+            t1 = lc_lst[s1][0][0]
+            t2 = lc_lst[s2][0][-1]
+            ax.set_xlim(t1, t2)
+    
+    
+            if len(sector_lst)>=15:
+                ax.xaxis.set_major_locator(tck.MultipleLocator(20))
+                ax.xaxis.set_minor_locator(tck.MultipleLocator(5))
+            elif len(sector_lst)>=5:
+                ax.xaxis.set_major_locator(tck.MultipleLocator(10))
+                ax.xaxis.set_minor_locator(tck.MultipleLocator(1))
+            else:
+                ax.xaxis.set_major_locator(tck.MultipleLocator(5))
+                ax.xaxis.set_minor_locator(tck.MultipleLocator(1))
+    
+            ax.grid(True, axis='x', ls='--')
+            ax.set_axisbelow(True)
+    
+            d = 2
+            kwargs = dict(marker=[(-1, -d), (1, d)], markersize=12,
+                        linestyle='none', color='k', mec='k', mew=1, clip_on=False)
+            if iseg==0:
+                ax.set_ylabel('FLUX')
+            if iseg>0:
+                ax.spines.left.set_visible(False)
+                ax.tick_params(labelleft=False)
+                ax.set_yticks([])
+                ax.plot([0, 0], [0, 1], transform=ax.transAxes, **kwargs)
+            if iseg<len(segment_lst)-1:
+                ax.spines.right.set_visible(False)
+                ax.plot([1, 1], [0, 1], transform=ax.transAxes, **kwargs)
+    
+        y1 = min([ax.get_ylim()[0] for ax in axlc_lst])
+        y2 = max([ax.get_ylim()[1] for ax in axlc_lst])
+        for iseg, ax in enumerate(axlc_lst):
+            ax.set_ylim(y1, y2)
+            segs = segment_lst[iseg]
+            s1 = segs[0]
+            s2 = segs[-1]
+            x1, x2 = ax.get_xlim()
+            if len(segs)==1:
+                text = 'S{:02d}'.format(s1)
+            else:
+                text = 'S{:02d}-{:02d}'.format(s1, s2)
+            ax.text(0.95*x1+0.05*x2, 0.05*y1+0.95*y2, text)
+            if iseg==len(segment_lst)-1:
+                ax2 = ax.twinx()
+                ax2.spines.left.set_visible(False)
+                ax2.set_ylim(y1/medf0, y2/medf0)
+    
+        if include_gls:
+            axgls = self.add_axes([0.7, 0.1, 0.25, 0.34])
+            period_lst = np.logspace(-3, 1, 1000)
+            freq_lst = 1/period_lst
+            for sector, dataitem in sorted(lc_lst.items()):
+                t_lst, f_lst = dataitem
+                pdm = periodogram.GLS(t_lst, f_lst)
+                power, _ = pdm.get_power(period=period_lst)
+                color = 'C{}'.format(sector%10)
+                axgls.plot(freq_lst, power, '-', lw=0.5, alpha=0.6)
+            axgls.set_xscale('log')
+            axgls.set_yscale('log')
+            axgls.set_xlim(0.1, 1000)
+            axgls.set_xlabel('Frequency (c/d)')
+            axgls.axvline(1440/2, c='k', ls='--', lw=0.5)
+    
+        # read catalog record
+        hip     = ticrow['HIP']
+        tyc     = ticrow['TYC']
+        ucac4   = ticrow['UCAC4']
+        tmass   = ticrow['_2MASS']
+        sdss    = ticrow['objID']
+        allwise = ticrow['WISEA']
+        gaia2   = ticrow['GAIA']
+        apass   = ticrow['APASS']
+        kic     = ticrow['KIC']
+        vmag = ticrow['Vmag']
+        gmag = ticrow['gmag']
+        rmag = ticrow['rmag']
+        imag = ticrow['imag']
+        jmag = ticrow['Jmag']
+        hmag = ticrow['Hmag']
+        kmag = ticrow['Kmag']
+        ra    = ticrow['RAJ2000']
+        dec   = ticrow['DEJ2000']
+        plx   = ticrow['Plx']
+        e_plx = ticrow['e_Plx']
+        Gmag  = gaiarow['Gmag']
+        bprp0 = gaiarow['BP-RP'] - gaiarow['E_BP-RP_']
+        coord = SkyCoord(ra, dec, unit='deg')
+        gc = coord.transform_to('galactic')
+        l = gc.l.deg
+        b = gc.b.deg
+        
+        teff = ticrow['Teff']
+        logg = ticrow['logg']
+        fe_h = ticrow['__M_H_']
+        rad  = ticrow['Rad']
+        mass = ticrow['Mass']
+        lumc = ticrow['LClass']
+        lum  = ticrow['Lum']
+        ebv  = ticrow['E_B-V_']
+        
+        text1_lst = ['TIC {}'.format(tic)]
+        if hip is not np.ma.masked and hip>0:
+            text1_lst.append('HIP {}'.format(hip))
+        if len(tyc)>0:
+            text1_lst.append('TYC {}'.format(tyc))
+        if kic is not np.ma.masked and kic>0:
+            text1_lst.append('KIC {}'.format(kic))
+        if len(ucac4)>0:
+            text1_lst.append('UCAC4 {}'.format(ucac4))
+        if len(tmass)>0:
+            text1_lst.append('2MASS J{}'.format(tmass))
+        if len(allwise)>0:
+            text1_lst.append('ALLWISE {}'.format(allwise))
+        if gaia2 is not np.ma.masked and gaia2>0:
+            text1_lst.append('GAIA DR2 {}'.format(gaia2))
+    
+        text1_lst.append('')
+        text1_lst.append('ICRS = {:9.5f}, {:9.5f}'.format(ra, dec))
+        text1_lst.append('Gal. = {:9.5f}, {:9.5f}'.format(l, b))
+    
+        self.text(0.04, 0.38, '\n'.join(text1_lst), fontfamily='monospace',
+                ha='left', va='top')
+    
+        text3_lst = []
+    
+        _text_lst = []
+        if vmag is not np.ma.masked:
+            _text_lst.append('V = {:5.2f}'.format(vmag))
+        if Gmag is not np.ma.masked:
+            _text_lst.append('G = {:5.2f}'.format(Gmag))
+        text3_lst.append('  '.join(_text_lst))
+    
+        _text_lst = []
+        if jmag is not np.ma.masked:
+            _text_lst.append('J = {:5.2f}'.format(jmag))
+        if hmag is not np.ma.masked:
+            _text_lst.append('H = {:5.2f}'.format(hmag))
+        text3_lst.append('  '.join(_text_lst))
+    
+        if kmag is not np.ma.masked:
+            text3_lst.append('K = {:5.2f}'.format(kmag))
+        if vmag is not np.ma.masked and kmag is not np.ma.masked:
+            text3_lst.append('V-Ks = {:+5.2f}'.format(vmag-kmag))
+        if bprp0 is not np.ma.masked:
+            text3_lst.append('G(Bp-Rp) = {:+5.2f}'.format(bprp0))
+        text3_lst.append('')
+    
+        if plx is not np.ma.masked:
+            if e_plx is not np.ma.masked:
+                text = u'Plx = {:.3f} \xb1 {:.3f} ({:.2f}%)'.format(
+                        plx, e_plx, e_plx/plx*100)
+            else:
+                text = 'Plx = {:8g}'.format(plx)
+            text3_lst.append(text)
+    
+        _text_lst = []
+        if teff is not np.ma.masked and teff>0:
+            _text_lst.append('Teff = {:5g}'.format(teff))
+        if logg is not np.ma.masked and logg>0:
+            _text_lst.append('logg = {:3.2f}'.format(logg))
+        text3_lst.append('  '.join(_text_lst))
+
+        if fe_h is not np.ma.masked:
+            text3_lst.append('[M/H] = {:+4.2f}'.format(fe_h))
+
+        _text_lst = []
+        if rad is not np.ma.masked:
+            _text_lst.append('R = {:4.2f}'.format(rad))
+        if mass is not np.ma.masked:
+            _text_lst.append('M = {:4.2f}'.format(mass))
+        if lum is not np.ma.masked:
+            _text_lst.append('L = {:4.2f}'.format(lum))
+        text3_lst.append('  '.join(_text_lst))
+    
+        if lumc is not np.ma.masked:
+            text3_lst.append('Class: {}'.format(lumc))
+        if ebv is not np.ma.masked:
+            text3_lst.append('E(B-V) = {:5.3f}'.format(ebv))
+    
+        self.text(0.20, 0.38, '\n'.join(text3_lst), fontfamily='monospace',
+                ha='left', va='top')
+    
+        title = 'TIC {:d}'.format(tic)
+        self.suptitle(title)
+    
+        #fig1.savefig(figname)
+        #plt.close(fig1)
+
