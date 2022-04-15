@@ -48,6 +48,8 @@ class TessLightCurve(object):
                 self.aperture_mask[y0+iy-cy, x0+ix-cx] = self.aperture.data[iy, ix]
 
     def get_lc(self):
+        """Get light curve.
+        """
 
         # get tesscutfile
         filename, camera, ccd = self.target.get_tesscutfile(
@@ -56,6 +58,8 @@ class TessLightCurve(object):
                                 ysize  = self.ysize,
                                 )
         if filename is None:
+            # tesscut file is not in cache and need to be downloaded from MAST
+            # archive
             self.target.download_tesscut(self.sector, self.xsize, self.ysize)
             filename, camera, ccd = self.target.get_tesscutfile(
                                     sector = self.sector,
@@ -84,6 +88,7 @@ class TessLightCurve(object):
         self.tesscutimg.set_bkgmask(bkgmask)
 
         t_lst, q_lst, flux_lst, bkg_lst = [], [], [], []
+        # initialize list of barycenter positions (x, y)
         bcx_lst, bcy_lst = [], []
         for row in self.tesscutimg.table:
             t_lst.append(row['TIME'])
@@ -91,6 +96,7 @@ class TessLightCurve(object):
             fluximg = row['FLUX']
             xsum = (fluximg*aperture).sum(axis=0)
             ysum = (fluximg*aperture).sum(axis=1)
+            # calculate barycenter
             bcx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
             bcy = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
             flux = (aperture*fluximg).sum()
@@ -110,15 +116,33 @@ class TessLightCurve(object):
         self.bcy_lst  = np.array(bcy_lst) - self.aperture_center[0]
         self.fluxcorr_lst = self.flux_lst - self.bkg_lst
 
+        # find cadence in minutes
+        dt = np.median(np.diff(self.t_lst))*24*60
+        if abs(dt-2)<0.1:
+            self.cadence = 2
+        elif abs(dt-10)<0.1:
+            self.cadence = 10
+        elif abs(dt-30)<0.1:
+            self.cadence = 30
+        else:
+            self.cadence = 0
+
         #videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
         #        self.tic, sector, camera, ccd)
         #make_movie(self, tesscutimg, videoname)
 
     def get_pdm(self):
+        """Get periodogram.
+        """
         m = self.q_lst==0
         self.pdm = GLS(self.t_lst[m], self.fluxcorr_lst[m])
 
     def save_fits(self, filename):
+        """Save the light curve into FITS file.
+
+        Args:
+            filename (str): Filename of output FITS.
+        """
 
         lc_table = Table()
         lc_table.add_column(self.t_lst,     name='TIME')
