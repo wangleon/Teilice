@@ -45,6 +45,19 @@ def get_aperture_bound(aperture):
                         bound_lst.append(line)
     return bound_lst
 
+def get_circle(ra0, dec0, r):
+    alpha0 = np.deg2rad(ra0)
+    delta0 = np.deg2rad(dec0)
+
+    l = np.deg2rad(np.arange(0, 360+1e-3))
+    b = np.deg2rad(np.repeat(90-r, l.size))
+    delta = np.arcsin(np.sin(delta0)*np.sin(b) \
+            + np.cos(delta0)*np.cos(b)*np.cos(l))
+    a = np.arctan2(-np.cos(b)*np.sin(l),
+            np.cos(delta0)*np.sin(b) - np.sin(delta0)*np.cos(b)*np.cos(l)
+            )
+    alpha = a + alpha0 + 2*np.pi
+    return np.rad2deg(alpha)%360, np.rad2deg(delta)
 
 class Tesscut_LC(Figure):
     def __init__(self, tesslc, *args, **kwargs):
