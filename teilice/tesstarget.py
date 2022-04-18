@@ -1,6 +1,8 @@
 import os
 import re
 import math
+
+import numpy as np
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
@@ -21,10 +23,24 @@ def get_sourceinfo(tic):
                 column_filters={'TIC': '={}'.format(tic)}
                 ).query_constraints()
     tictable = tablelist[catid]
-    row = tictable[0]
-    return {'ra':   row['RAJ2000'],
-            'dec':  row['DEJ2000'],
-            'Tmag': row['Tmag'],
+    ticrow = tictable[0]
+
+    gaia2 = ticrow['GAIA']
+    if gaia2 is not np.ma.masked:
+        catid = 'I/345/gaia2'
+        tablelist = Vizier(catalog=catid, columns=['**'],
+                    column_filters={'Source': '={}'.format(gaia2)}
+                    ).query_constraints()
+        gaiatable = tablelist[catid]
+        gaiarow  = gaiatable[0]
+    else:
+        gaiarow = None
+    return {
+            'ticrow': ticrow,
+            'gaiarow': gaiarow,
+            'ra':   ticrow['RAJ2000'],
+            'dec':  ticrow['DEJ2000'],
+            'Tmag': ticrow['Tmag'],
             }
 
 def query_nearbystars(coord, r):
@@ -54,8 +70,8 @@ class TessTarget(object):
     def __init__(self, tic):
 
         # check existence of cache folders
-        if not os.path.exists(CACHE_PATH):
-            os.mkdir(CACHE_PATH)
+        #if not os.path.exists(CACHE_PATH):
+        #    os.mkdir(CACHE_PATH)
 
         # get star info
         self.tic = tic
@@ -64,11 +80,13 @@ class TessTarget(object):
         self.dec  = info['dec']
         self.tmag = info['Tmag']
         self.coord = SkyCoord(self.ra, self.dec, unit='deg')
+        self.ticrow = info['ticrow']
+        self.gaiarow = info['gaiarow']
 
         # get nearby stars
-        self.get_nearbystars()
+        #self.get_nearbystars()
 
-    def get_nearbystars(self, r=250):
+    def get_nearbystars(self, r=250, cache_path=NEARBY_PATH):
         """Query nearby stars within given radius.
 
         Args:
@@ -77,11 +95,11 @@ class TessTarget(object):
         r = math.ceil(r)
         found_cache = False
 
-        if not os.path.exists(NEARBY_PATH):
-            os.mkdir(NEARBY_PATH)
+        if not os.path.exists(cache_path):
+            os.mkdir(cache_path)
 
         # check if the target has already in the cache
-        for fname in os.listdir(NEARBY_PATH):
+        for fname in os.listdir(cache_path):
             mobj = re.match('tic_nearby_(\d+)_r(\d+)s\.vot', fname)
             if mobj:
                 _tic = int(mobj.group(1))
