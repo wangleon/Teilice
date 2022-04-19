@@ -62,19 +62,32 @@ def read_2min_lc_backup(tic, sector_lst, lc_path):
         lc_lst[sector] = (t_lst, f_lst)
     return lc_lst
 
-def read_lc(filename):
-    table = fits.getdata(filename)
-    t_lst = table['TIME']
-    f_lst = table['PDCSAP_FLUX']
-    q_lst = table['QUALITY']
-    m = q_lst==0
-    t_lst = t_lst[m]
-    f_lst = f_lst[m]
+def read_lc(filename, fluxkey='PDCSAP_FLUX'):
+    hdulst = fits.open(filename)
+    data1 = hdulst[1].data
+    data2 = hdulst[2].data
+    hdulst.close()
+
+    t_lst = data1['TIME']
+    f_lst = data1[fluxkey]
+    q_lst = data1['QUALITY']
+    cenx_lst = data1['MOM_CENTR1']
+    ceny_lst = data1['MOM_CENTR2']
+
+    m1 = q_lst==0
     # filter NaN values
-    m2 = ~np.isnan(f_lst)
-    t_lst = t_lst[m2]
-    f_lst = f_lst[m2]
-    return t_lst, f_lst
+    m2 = ~np.isnan(t_lst)
+    m3 = ~np.isnan(f_lst)
+    mask = m1*m2*m3
+
+    t_lst = t_lst[mask]
+    f_lst = f_lst[mask]
+    cenx_lst = cenx_lst[mask]
+    ceny_lst = ceny_lst[mask]
+
+    aperture = data2&2>0
+
+    return t_lst, f_lst, cenx_lst, ceny_lst, aperture
 
 def read_tp(filename):
     hdulst = fits.open(filename)
@@ -86,7 +99,7 @@ def read_tp(filename):
     mask1 = data1['QUALITY']==0
     mask2 = ~np.isnan(data1['TIME'])
     data1 = data1[mask1*mask2]
-    objmask = data2&2>0
+    aperture = data2&2>0
 
     t_lst = data1['TIME']
     image_lst = data1['FLUX']
@@ -112,4 +125,4 @@ def read_tp(filename):
         }
     wcoord = WCS(wcs_input_dict)
 
-    return t_lst, image_lst, objmask, wcoord
+    return t_lst, image_lst, aperture, wcoord
