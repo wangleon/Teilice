@@ -92,7 +92,7 @@ class TessLightCurve(object):
 
         t_lst, q_lst, fluxsum_lst, bkg_lst = [], [], [], []
         # initialize list of barycenter positions (x, y)
-        bcx_lst, bcy_lst = [], []
+        cenx_lst, ceny_lst = [], []
         for row in self.tesscutimg.table:
             t_lst.append(row['TIME'])
             q_lst.append(row['QUALITY'])
@@ -100,24 +100,27 @@ class TessLightCurve(object):
             xsum = (fluximg*aperture).sum(axis=0)
             ysum = (fluximg*aperture).sum(axis=1)
             # calculate barycenter
-            bcx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
-            bcy = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
+            cenx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
+            ceny = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
             fluxsum = (aperture*fluximg).sum()
             mean_bkg = (bkgmask*fluximg).sum()/nbkg
             bkg = mean_bkg*nobj
             
             fluxsum_lst.append(fluxsum)
             bkg_lst.append(bkg)
-            bcx_lst.append(bcx)
-            bcy_lst.append(bcy)
+            cenx_lst.append(cenx)
+            ceny_lst.append(ceny)
 
         self.t_lst = np.array(t_lst)
         self.q_lst = np.array(q_lst)
         self.fluxsum_lst = np.array(fluxsum_lst)
         self.bkg_lst  = np.array(bkg_lst)
-        self.bcx_lst  = np.array(bcx_lst) - self.aperture_center[1]
-        self.bcy_lst  = np.array(bcy_lst) - self.aperture_center[0]
+        self.cenx_lst  = np.array(cenx_lst)# - self.aperture_center[1]
+        self.ceny_lst  = np.array(ceny_lst)# - self.aperture_center[0]
         self.flux_lst = self.fluxsum_lst - self.bkg_lst
+        self.tcorr_lst     = self.tesscutimg.table['TIMECORR']
+        self.pos_corr1_lst = self.tesscutimg.table['POS_CORR1']
+        self.pos_corr2_lst = self.tesscutimg.table['POS_CORR2']
 
         # find cadence in minutes
         dt = np.median(np.diff(self.t_lst))*24*60
@@ -148,17 +151,25 @@ class TessLightCurve(object):
         """
 
         lc_table = Table()
-        lc_table.add_column(self.t_lst,         name='TIME')
-        lc_table.add_column(self.q_lst,         name='QUALITY')
-        lc_table.add_column(self.fluxsum_lst,   name='FLUX_SUM')
-        lc_table.add_column(self.bkg_lst,       name='BACKGROUND')
-        lc_table.add_column(self.flux_lst,      name='FLUX')
-        lc_table.add_column(self.bcx_lst,       name='BCX')
-        lc_table.add_column(self.bcy_lst,       name='BCY')
+        lc_table.add_column(self.t_lst,     name='TIME')
+        lc_table.add_column(self.tcorr_lst, name='TIMECORR')
+        lc_table.add_column(self.flux_lst,  name='SAP_FLUX')
+        lc_table.add_column(self.bkg_lst,   name='SAP_BKG')
+        lc_table.add_column(self.q_lst,     name='QUALITY')
+        lc_table.add_column(self.cenx_lst,  name='MOM_CENTR1')
+        lc_table.add_column(self.ceny_lst,  name='MOM_CENTR2')
+        lc_table.add_column(self.pos_corr1_lst, name='POS_CORR1')
+        lc_table.add_column(self.pos_corr2_lst, name='POS_CORR2')
+
+        aperture_mask = np.ones((self.tesscutimg.ny, self.tesscutimg.nx),
+                            dtype=np.int32)
+        aperture_mask += np.int32(self.tesscutimg.aperture)*2
+        aperture_mask += np.int32(self.tesscutimg.bkgmask)*4
 
         hdulst = fits.HDUList([
                     fits.PrimaryHDU(),
                     fits.BinTableHDU(data=lc_table),
+                    fits.ImageHDU(data=aperture_mask),
                     ])
         hdulst.writeto(filename, overwrite=True)
 
