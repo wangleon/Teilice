@@ -681,8 +681,10 @@ class MultiSector_LC(Figure):
 
 class TpComplex(Figure):
 
-    def __init__(self, tic, tp_filename, lc_filename, tictable_cache,
-                gaia2table_cache, gaiae3table_cache, skyview_cache):
+    def __init__(self, tic, image_file, lc_file, tictable_cache,
+                gaia2table_cache, gaiae3table_cache, skyview_cache,
+                imagetype='tp',
+                fluxkey='PDCSAP_FLUX'):
 
         Figure.__init__(self, figsize=(12, 5.5))
         self.canvas = FigureCanvasAgg(self)
@@ -715,10 +717,24 @@ class TpComplex(Figure):
 
 
         ######## read lc file #########
-        tlc_lst, f_lst = read_lc(lc_filename)
+        result = read_lc(lc_file, fluxkey=fluxkey)
+        tlc_lst  = result[0]
+        f_lst    = result[1]
+        cenx_lst = result[2]
+        ceny_lst = result[3]
+        aperture = result[4]
+        bkgmask  = result[5]
+                        
 
         ########### read tp file #############
-        t_lst, image_lst, objmask, wcoord = read_tp(tp_filename) 
+        t_lst, image_lst, _, wcoord = read_tp(image_file)
+        if imagetype=='tesscut':
+            newimage_lst = []
+            nbkg = bkgmask.sum()
+            for image in image_lst:
+                bkg = (image*bkgmask).sum()/nbkg
+                newimage_lst.append(image - bkg)
+            image_lst = np.array(newimage_lst)
 
         # determine best frame
         medf = np.median(f_lst)
@@ -728,27 +744,13 @@ class TpComplex(Figure):
         image = image_lst[idx]
         ny, nx = image.shape
 
-        # calculate barycentric
-        bcx_lst = []
-        bcy_lst = []
-        for image in image_lst:
-            xsum = (image*objmask).sum(axis=0)
-            ysum = (image*objmask).sum(axis=1)
-            # calculate barycenter
-            bcx = (xsum*np.arange(nx)).sum()/(xsum.sum())
-            bcy = (ysum*np.arange(ny)).sum()/(ysum.sum())
-            bcx_lst.append(bcx)
-            bcy_lst.append(bcy)
-        bcx_lst = np.array(bcx_lst)
-        bcy_lst = np.array(bcy_lst)
-
         ax = self.add_axes([0.001, 0.52, 0.4, 0.4], projection=wcoord)
         ax.imshow(image, cmap='YlGnBu_r')
         _x1, _x2 = ax.get_xlim()
         _y1, _y2 = ax.get_ylim()
 
         # plot aperture
-        bound_lst = get_aperture_bound(objmask)
+        bound_lst = get_aperture_bound(aperture)
         for (x1, y1, x2, y2) in bound_lst:
             ax.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-', lw=1)
 
@@ -778,10 +780,10 @@ class TpComplex(Figure):
         ################## plot pixel-by-pixel lc ######################
         #x0, y0 = wcoord.all_world2pix(ra, dec, 0)
         yy, xx = np.mgrid[:ny:, :nx:]
-        y1 = max(min(yy[objmask])-2, 0)
-        y2 = min(max(yy[objmask])+3, ny)
-        x1 = max(min(xx[objmask])-2, 0)
-        x2 = min(max(xx[objmask])+3, nx)
+        y1 = max(min(yy[aperture])-2, 0)
+        y2 = min(max(yy[aperture])+3, ny)
+        x1 = max(min(xx[aperture])-2, 0)
+        x2 = min(max(xx[aperture])+3, nx)
         flux_lst = {}
         for image in image_lst:
             for y in range(y1, y2):
@@ -798,7 +800,7 @@ class TpComplex(Figure):
                 _w = 0.36/(x2-x1)
                 _h = 0.4/(y2-y1)
                 ax = self.add_axes([0.33+(x-x1)*_w, 0.52+(y-y1)*_h, _w, _h])
-                if objmask[y,x]:
+                if aperture[y,x]:
                     color = 'C3'
                 else:
                     color = 'C0'
@@ -823,8 +825,10 @@ class TpComplex(Figure):
 
         axbcx = self.add_axes([0.33, 0.05, 0.36, 0.21])
         axbcy = axbcx.twinx()
-        axbcx.plot(t_lst, bcx_lst, 'o', c='C1', mew=0, alpha=0.5, ms=1)
-        axbcy.plot(t_lst, bcy_lst, 'o', c='C2', mew=0, alpha=0.5, ms=1)
+        axbcx.plot(tlc_lst, cenx_lst-np.median(cenx_lst),
+                    'o', c='C1', mew=0, alpha=0.5, ms=1)
+        axbcy.plot(tlc_lst, ceny_lst-np.median(ceny_lst),
+                    'o', c='C2', mew=0, alpha=0.5, ms=1)
         for axbc in [axbcx, axbcy]:
             axbc.set_xlim(tlc_lst[0], tlc_lst[-1])
         for tick in axbcx.xaxis.get_major_ticks():
@@ -864,7 +868,7 @@ class TpComplex(Figure):
             ax2.plot(x2_lst, y2_lst, '-', c='b', lw=0.3)
 
         # plot aperture
-        bound_lst = get_aperture_bound(objmask)
+        bound_lst = get_aperture_bound(aperture)
         for (x1, y1, x2, y2) in bound_lst:
             ra_lst, dec_lst = wcoord.all_pix2world(
                     [x1-0.5,x2-0.5], [y1-0.5,y2-0.5], 0)
@@ -889,8 +893,8 @@ class TpComplex(Figure):
 
         xcoords = ax2.coords[0]
         ycoords = ax2.coords[1]
-        xcoords.set_major_formatter('d.ddd')
-        ycoords.set_major_formatter('d.ddd')
+        xcoords.set_major_formatter('d.dd')
+        ycoords.set_major_formatter('d.dd')
         xcoords.ticklabels.set_fontsize(7)
         ycoords.ticklabels.set_fontsize(7)
         xcoords.set_axislabel('RA (deg)',fontsize=7)
@@ -899,7 +903,7 @@ class TpComplex(Figure):
         ################## plot small skyview ###########################
 
         ax3 = self.add_axes([0.67, 0.05, 0.4, 0.4], projection=self.wcoord3)
-        ax3.imshow(self.dss100data, cmap='gray_r')
+        ax3.imshow(self.dsssmalldata, cmap='gray_r')
 
         _x1, _x2 = ax3.get_xlim()
         _y1, _y2 = ax3.get_ylim()
@@ -1046,15 +1050,15 @@ class TpComplex(Figure):
         self.wcoord2 = WCS(dss360head)
 
         ############## get small skyview image ###########
-        dss100_filename = os.path.join(self.cache['skyview'],
-                        'skyview_dss_{:012d}_100.fits'.format(self.tic))
-        if os.path.exists(dss100_filename):
-            hdulst = fits.open(dss100_filename)
-            dss100data = hdulst[0].data
-            dss100head = hdulst[0].header
+        radius = 100 # in unit of arcsec
+        dsssmall_filename = os.path.join(self.cache['skyview'],
+                'skyview_dss_{:012d}_{:d}.fits'.format(self.tic, radius))
+        if os.path.exists(dsssmall_filename):
+            hdulst = fits.open(dsssmall_filename)
+            dsssmalldata = hdulst[0].data
+            dsssmallhead = hdulst[0].header
         else:
             # get large DSS image
-            radius = 100  # in unit of arcsec
             for i in range(10):
                 try:
                     paths = SkyView.get_images(position=self.coord,
@@ -1068,11 +1072,11 @@ class TpComplex(Figure):
                     continue
             hdu = paths[0][0]
             hdulst = paths[0]
-            hdulst.writeto(dss100_filename, overwrite=True)
-            dss100data = hdu.data
-            dss100head = hdu.header
-        self.dss100data = dss100data
-        self.wcoord3 = WCS(dss100head)
+            hdulst.writeto(dsssmall_filename, overwrite=True)
+            dsssmalldata = hdu.data
+            dsssmallhead = hdu.header
+        self.dsssmalldata = dsssmalldata
+        self.wcoord3 = WCS(dsssmallhead)
 
     def plot_text(self):
         tictable = self.tictable
