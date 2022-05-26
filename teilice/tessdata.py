@@ -6,7 +6,8 @@ from astropy.wcs import WCS
 filekey_lst = {
          1: (2018206045859, 120),  2: (2018234235059, 121),
          3: (2018263035959, 123),  4: (2018292075959, 124),
-         5: (2018319095959, 125),  6: (2018349182459, 126),
+         5: (2018319095959, 125),  #6: (2018349182459, 126),
+         6: (2018349182500, 126),
          7: (2019006130736, 131),  8: (2019032160000, 136),
          9: (2019058134432, 139), 10: (2019085135100, 140),
         11: (2019112060037, 143), 12: (2019140104343, 144),
@@ -78,16 +79,17 @@ def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     # filter NaN values
     m2 = ~np.isnan(t_lst)
     m3 = ~np.isnan(f_lst)
-    mask = m1*m2*m3
+    m = m1*m2*m3
 
-    t_lst = t_lst[mask]
-    f_lst = f_lst[mask]
-    cenx_lst = cenx_lst[mask]
-    ceny_lst = ceny_lst[mask]
+    t_lst = t_lst[m]
+    f_lst = f_lst[m]
+    cenx_lst = cenx_lst[m]
+    ceny_lst = ceny_lst[m]
 
     aperture = data2&2>0
+    bkgmask  = data2&4>0
 
-    return t_lst, f_lst, cenx_lst, ceny_lst, aperture
+    return t_lst, f_lst, cenx_lst, ceny_lst, aperture, bkgmask
 
 def read_tp(filename):
     hdulst = fits.open(filename)
