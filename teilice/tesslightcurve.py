@@ -47,20 +47,27 @@ class TessLightCurve(object):
             for ix in np.arange(self.aperture.shape[1]):
                 self.aperture_mask[y0+iy-cy, x0+ix-cx] = self.aperture.data[iy, ix]
 
-    def get_lc(self):
+    def get_lc(self, tesscut_path=None):
+        """Get light curve.
+        """
 
         # get tesscutfile
         filename, camera, ccd = self.target.get_tesscutfile(
                                 sector = self.sector,
                                 xsize  = self.xsize,
                                 ysize  = self.ysize,
+                                tesscut_path = tesscut_path,
                                 )
         if filename is None:
-            self.target.download_tesscut(self.sector, self.xsize, self.ysize)
+            # tesscut file is not in cache and need to be downloaded from MAST
+            # archive
+            self.target.download_tesscut(self.sector, self.xsize, self.ysize,
+                                tesscut_path=tesscut_path)
             filename, camera, ccd = self.target.get_tesscutfile(
                                     sector = self.sector,
                                     xsize  = self.xsize,
                                     ysize  = self.ysize,
+                                    tesscut_path = tesscut_path,
                                     )
 
         self.camera = camera
@@ -83,55 +90,86 @@ class TessLightCurve(object):
         nbkg = bkgmask.sum()
         self.tesscutimg.set_bkgmask(bkgmask)
 
-        t_lst, q_lst, flux_lst, bkg_lst = [], [], [], []
-        bcx_lst, bcy_lst = [], []
+        t_lst, q_lst, fluxsum_lst, bkg_lst = [], [], [], []
+        # initialize list of barycenter positions (x, y)
+        cenx_lst, ceny_lst = [], []
         for row in self.tesscutimg.table:
             t_lst.append(row['TIME'])
             q_lst.append(row['QUALITY'])
             fluximg = row['FLUX']
             xsum = (fluximg*aperture).sum(axis=0)
             ysum = (fluximg*aperture).sum(axis=1)
-            bcx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
-            bcy = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
-            flux = (aperture*fluximg).sum()
+            # calculate barycenter
+            cenx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
+            ceny = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
+            fluxsum = (aperture*fluximg).sum()
             mean_bkg = (bkgmask*fluximg).sum()/nbkg
             bkg = mean_bkg*nobj
             
-            flux_lst.append(flux)
+            fluxsum_lst.append(fluxsum)
             bkg_lst.append(bkg)
-            bcx_lst.append(bcx)
-            bcy_lst.append(bcy)
+            cenx_lst.append(cenx)
+            ceny_lst.append(ceny)
 
         self.t_lst = np.array(t_lst)
         self.q_lst = np.array(q_lst)
-        self.flux_lst = np.array(flux_lst)
+        self.fluxsum_lst = np.array(fluxsum_lst)
         self.bkg_lst  = np.array(bkg_lst)
-        self.bcx_lst  = np.array(bcx_lst) - self.aperture_center[1]
-        self.bcy_lst  = np.array(bcy_lst) - self.aperture_center[0]
-        self.fluxcorr_lst = self.flux_lst - self.bkg_lst
+        self.cenx_lst  = np.array(cenx_lst)# - self.aperture_center[1]
+        self.ceny_lst  = np.array(ceny_lst)# - self.aperture_center[0]
+        self.flux_lst = self.fluxsum_lst - self.bkg_lst
+        self.tcorr_lst     = self.tesscutimg.table['TIMECORR']
+        self.pos_corr1_lst = self.tesscutimg.table['POS_CORR1']
+        self.pos_corr2_lst = self.tesscutimg.table['POS_CORR2']
+
+        # find cadence in minutes
+        dt = np.median(np.diff(self.t_lst))*24*60
+        if abs(dt-2)<0.1:
+            self.cadence = 2
+        elif abs(dt-10)<0.1:
+            self.cadence = 10
+        elif abs(dt-30)<0.1:
+            self.cadence = 30
+        else:
+            self.cadence = 0
 
         #videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
         #        self.tic, sector, camera, ccd)
         #make_movie(self, tesscutimg, videoname)
 
     def get_pdm(self):
+        """Get periodogram.
+        """
         m = self.q_lst==0
-        self.pdm = GLS(self.t_lst[m], self.fluxcorr_lst[m])
+        self.pdm = GLS(self.t_lst[m], self.flux_lst[m])
 
     def save_fits(self, filename):
+        """Save the light curve into FITS file.
+
+        Args:
+            filename (str): Filename of output FITS.
+        """
 
         lc_table = Table()
         lc_table.add_column(self.t_lst,     name='TIME')
+        lc_table.add_column(self.tcorr_lst, name='TIMECORR')
+        lc_table.add_column(self.flux_lst,  name='SAP_FLUX')
+        lc_table.add_column(self.bkg_lst,   name='SAP_BKG')
         lc_table.add_column(self.q_lst,     name='QUALITY')
-        lc_table.add_column(self.flux_lst,  name='FLUX_RAW')
-        lc_table.add_column(self.bkg_lst,   name='BKG')
-        lc_table.add_column(self.fluxcorr_lst, name='FLUX_CORR')
-        lc_table.add_column(self.bcx_lst,   name='BCX')
-        lc_table.add_column(self.bcy_lst,   name='BCY')
+        lc_table.add_column(self.cenx_lst,  name='MOM_CENTR1')
+        lc_table.add_column(self.ceny_lst,  name='MOM_CENTR2')
+        lc_table.add_column(self.pos_corr1_lst, name='POS_CORR1')
+        lc_table.add_column(self.pos_corr2_lst, name='POS_CORR2')
+
+        aperture_mask = np.ones((self.tesscutimg.ny, self.tesscutimg.nx),
+                            dtype=np.int32)
+        aperture_mask += np.int32(self.tesscutimg.aperture)*2
+        aperture_mask += np.int32(self.tesscutimg.bkgmask)*4
 
         hdulst = fits.HDUList([
                     fits.PrimaryHDU(),
                     fits.BinTableHDU(data=lc_table),
+                    fits.ImageHDU(data=aperture_mask),
                     ])
         hdulst.writeto(filename, overwrite=True)
 
@@ -161,22 +199,6 @@ class TessLightCurve(object):
         fig = LC_PDM(self, figsize=(12, 6), dpi=200)
         fig.savefig(figname)
         fig.close()
-
-
-    def plot_lc(self, figname):
-
-        fig = plt.figure(figsize=(12, 7), dpi=200)
-        ax1 = fig.add_subplot(311)
-        ax2 = fig.add_subplot(312)
-        ax3 = fig.add_subplot(313)
-        ax4 = ax3.twinx()
-        ax1.plot(t_lst, flux_lst, '-', lw=0.6, alpha=1)
-        ax1.plot(t_lst, bkg_lst,  '-', lw=0.6, alpha=1)
-        ax2.plot(t_lst, flux_lst-bkg_lst, '-', lw=0.6, alpha=1)
-        ax3.plot(t_lst, bcx_lst, '-', c='C0', lw=0.6, alpha=1)
-        ax4.plot(t_lst, bcy_lst, '-', c='C1', lw=0.6, alpha=1)
-        fig.savefig(figname)
-        plt.close(fig)
 
     def plot_image2(self, tesscutimg, figname):
 

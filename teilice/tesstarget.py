@@ -1,6 +1,8 @@
 import os
 import re
 import math
+
+import numpy as np
 import astropy.units as u
 from astropy.coordinates import SkyCoord
 from astropy.table import Table
@@ -10,18 +12,48 @@ from astroquery.mast import Tesscut
 from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH
 
 def get_sourceinfo(tic):
+    """Get basic information of input TIC target.
+
+    Args:
+        tic (int): TIC number.
+
+    """
     catid = 'IV/38/tic'
     tablelist = Vizier(catalog=catid, columns=['**'],
                 column_filters={'TIC': '={}'.format(tic)}
                 ).query_constraints()
     tictable = tablelist[catid]
-    row = tictable[0]
-    return {'ra':   row['RAJ2000'],
-            'dec':  row['DEJ2000'],
-            'Tmag': row['Tmag'],
+    ticrow = tictable[0]
+
+    gaia2 = ticrow['GAIA']
+    if gaia2 is not np.ma.masked:
+        catid = 'I/345/gaia2'
+        tablelist = Vizier(catalog=catid, columns=['**'],
+                    column_filters={'Source': '={}'.format(gaia2)}
+                    ).query_constraints()
+        gaiatable = tablelist[catid]
+        gaiarow  = gaiatable[0]
+    else:
+        gaiarow = None
+    return {
+            'ticrow': ticrow,
+            'gaiarow': gaiarow,
+            'ra':   ticrow['RAJ2000'],
+            'dec':  ticrow['DEJ2000'],
+            'Tmag': ticrow['Tmag'],
             }
 
 def query_nearbystars(coord, r):
+    """Query the nearby TIC objects around a given coordinate.
+
+    Args:
+        coord (astropy.coordinates.SkyCoord): Astropy object of sky coordinate.
+        r (float): radius in unti of arcsec.
+
+    Returns:
+        astropy.table.Table
+
+    """
     catid = 'IV/38/tic'
     viz = Vizier(catalog=catid, columns=['**', '+_r'])
     viz.ROW_LIMIT=-1
@@ -38,8 +70,8 @@ class TessTarget(object):
     def __init__(self, tic):
 
         # check existence of cache folders
-        if not os.path.exists(CACHE_PATH):
-            os.mkdir(CACHE_PATH)
+        #if not os.path.exists(CACHE_PATH):
+        #    os.mkdir(CACHE_PATH)
 
         # get star info
         self.tic = tic
@@ -48,18 +80,26 @@ class TessTarget(object):
         self.dec  = info['dec']
         self.tmag = info['Tmag']
         self.coord = SkyCoord(self.ra, self.dec, unit='deg')
+        self.ticrow = info['ticrow']
+        self.gaiarow = info['gaiarow']
 
         # get nearby stars
-        self.get_nearbystars()
+        #self.get_nearbystars()
 
-    def get_nearbystars(self, r=250):
+    def get_nearbystars(self, r=250, cache_path=NEARBY_PATH):
+        """Query nearby stars within given radius.
+
+        Args:
+            r (int): radius of searching region.
+        """
         r = math.ceil(r)
         found_cache = False
 
-        if not os.path.exists(NEARBY_PATH):
-            os.mkdir(NEARBY_PATH)
+        if not os.path.exists(cache_path):
+            os.mkdir(cache_path)
 
-        for fname in os.listdir(NEARBY_PATH):
+        # check if the target has already in the cache
+        for fname in os.listdir(cache_path):
             mobj = re.match('tic_nearby_(\d+)_r(\d+)s\.vot', fname)
             if mobj:
                 _tic = int(mobj.group(1))
@@ -68,9 +108,11 @@ class TessTarget(object):
                     found_cache = True
                     break
         if found_cache:
+            # nearby stars already in cache
             filename = os.path.join(NEARBY_PATH, fname)
             tictable = Table.read(filename)
         else:
+            # nearby stars not in cache
             tictable = query_nearbystars(self.coord, r)
             fname = 'tic_nearby_{:011d}_r{:d}s.vot'.format(self.tic, r)
             filename = os.path.join(NEARBY_PATH, fname)
@@ -79,15 +121,20 @@ class TessTarget(object):
         self.tictable = tictable
 
     def get_sectors(self):
+        """Get the observed sectors of target.
+        """
         sector_table = Tesscut.get_sectors(coordinates=self.coord)
         return list(sector_table['sector'])
 
-    def get_tesscutfile(self, sector, xsize, ysize):
+    def get_tesscutfile(self, sector, xsize, ysize, tesscut_path):
         pattern = 'tess\-s(\d{4})\-(\d)\-(\d)_(\d+\.\d+)_(\-?\d+\.\d+)_(\d+)x(\d+)_astrocut\.fits'
-        if not os.path.exists(TESSCUT_PATH):
-            os.mkdir(TESSCUT_PATH)
+        if tesscut_path is None:
+            tesscut_path = TESSCUT_PATH
 
-        for fname in os.listdir(TESSCUT_PATH):
+        if not os.path.exists(tesscut_path):
+            os.mkdir(tesscut_path)
+
+        for fname in os.listdir(tesscut_path):
             mobj = re.match(pattern, fname)
             if mobj:
                 _sector = int(mobj.group(1))
@@ -103,26 +150,39 @@ class TessTarget(object):
                 _sep = self.coord.separation(_coord)
                 _r = _sep.deg*3600  # convert separation to arcsec
                 if _r < 1.0 and _xsize==xsize and _ysize==ysize:
-                    filename = os.path.join(TESSCUT_PATH, fname)
+                    filename = os.path.join(tesscut_path, fname)
                     return (filename, camera, ccd)
 
         return (None, None, None)
 
-    def download_tesscut(self, sector, xsize, ysize, method='wget'):
+    def download_tesscut(self, sector, xsize, ysize, tesscut_path=None, method='wget'):
+        """Download the tesscut images in a given sector and x/y sizes.
+        
+        Args:
+            sector (int): Tess sector number.
+            xsize (int): Number of pixels in X direction.
+            ysize (int): Number of pixels in Y direction.
+            tesscut_path (str): Path to save the TessCut files.
+            method (str): Method of file downloading. Options include 'wget',
+                and 'tesscut'.
+        """
+        if tesscut_path is None:
+            tesscut_path = TESSCUT_PATH
+
         if method == 'wget':
             website = 'https://mast.stsci.edu/tesscut'
             url = '{}/api/v0.1/astrocut?ra={}&dec={}&y={}&x={}'.format(
                     website, self.ra, self.dec, ysize, xsize)
             outfile = 'tesscut_tic{:011d}_{}x{}.zip'.format(
                     self.tic, xsize, ysize)
-            outfilename = os.path.join(TESSCUT_PATH, outfile)
+            outfilename = os.path.join(tesscut_path, outfile)
             command = 'wget -O {} --content-disposition "{}"'.format(outfilename, url)
             os.system(command)
-            command = 'unzip {} -d {}'.format(outfilename, TESSCUT_PATH)
+            command = 'unzip {} -d {}'.format(outfilename, tesscut_path)
             os.system(command)
             os.remove(outfilename)
         elif method == 'tesscut':
             Tesscut.download_cutouts(coordinates=self.coord, sector=sector,
-                    size=(ysize, xsize), path=TESSCUT_PATH, inflate=True)
+                    size=(ysize, xsize), path=tesscut_path, inflate=True)
         else:
             raise ValueError
