@@ -8,7 +8,7 @@ class TesscutImage(object):
     def __init__(self, filename):
         self.filename = filename
 
-        pattern = 'tess\-s(\d{4})\-(\d)\-(\d)_[\d.]+_[\-\d.]+_\d+x\d+_astrocut\.fits'
+        pattern = '^tess\-s(\d{4})\-(\d)\-(\d)_[\d.]+_[\-\d.]+_\d+x\d+_astrocut\.fits'
         mobj = re.match(pattern, os.path.basename(filename))
         if mobj:
             self.sector = int(mobj.group(1))
@@ -17,6 +17,7 @@ class TesscutImage(object):
 
         hdulst = fits.open(filename)
         self.table = hdulst[1].data
+        self.aperture_mask = hdulst[2].data
         self.header1 = hdulst[1].header
         self.header2 = hdulst[2].header
         hdulst.close()

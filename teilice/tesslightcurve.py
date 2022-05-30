@@ -161,8 +161,7 @@ class TessLightCurve(object):
         lc_table.add_column(self.pos_corr1_lst, name='POS_CORR1')
         lc_table.add_column(self.pos_corr2_lst, name='POS_CORR2')
 
-        aperture_mask = np.ones((self.tesscutimg.ny, self.tesscutimg.nx),
-                            dtype=np.int32)
+        aperture_mask = self.tesscutimg.aperture_mask & 1
         aperture_mask += np.int32(self.tesscutimg.aperture)*2
         aperture_mask += np.int32(self.tesscutimg.bkgmask)*4
 

@@ -575,8 +575,12 @@ class MultiSector_LC(Figure):
         dec   = ticrow['DEJ2000']
         plx   = ticrow['Plx']
         e_plx = ticrow['e_Plx']
-        Gmag  = gaiarow['Gmag']
-        bprp0 = gaiarow['BP-RP'] - gaiarow['E_BP-RP_']
+        if gaiarow is not None:
+            Gmag  = gaiarow['Gmag']
+            bprp0 = gaiarow['BP-RP'] - gaiarow['E_BP-RP_']
+        else:
+            Gmag  = None
+            bprp0 = None
         coord = SkyCoord(ra, dec, unit='deg')
         gc = coord.transform_to('galactic')
         l = gc.l.deg
@@ -619,7 +623,7 @@ class MultiSector_LC(Figure):
         _text_lst = []
         if vmag is not np.ma.masked:
             _text_lst.append('V = {:5.2f}'.format(vmag))
-        if Gmag is not np.ma.masked:
+        if Gmag is not None and Gmag is not np.ma.masked:
             _text_lst.append('G = {:5.2f}'.format(Gmag))
         text3_lst.append('  '.join(_text_lst))
     
@@ -634,7 +638,7 @@ class MultiSector_LC(Figure):
             text3_lst.append('K = {:5.2f}'.format(kmag))
         if vmag is not np.ma.masked and kmag is not np.ma.masked:
             text3_lst.append('V-Ks = {:+5.2f}'.format(vmag-kmag))
-        if bprp0 is not np.ma.masked:
+        if bprp0 is not None and bprp0 is not np.ma.masked:
             text3_lst.append('G(Bp-Rp) = {:+5.2f}'.format(bprp0))
         text3_lst.append('')
     
