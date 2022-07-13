@@ -3,6 +3,8 @@ import numpy as np
 import astropy.io.fits as fits
 from astropy.wcs import WCS
 
+from .tesslightcurve import TessLightCurve
+
 filekey_lst = {
          1: (2018206045859, 120),  2: (2018234235059, 121),
          3: (2018263035959, 123),  4: (2018292075959, 124),
@@ -81,15 +83,28 @@ def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     m3 = ~np.isnan(f_lst)
     m = m1*m2*m3
 
-    t_lst = t_lst[m]
-    f_lst = f_lst[m]
-    cenx_lst = cenx_lst[m]
-    ceny_lst = ceny_lst[m]
+    #t_lst = t_lst[m]
+    #f_lst = f_lst[m]
+    #cenx_lst = cenx_lst[m]
+    #ceny_lst = ceny_lst[m]
 
     aperture = data2&2>0
     bkgmask  = data2&4>0
 
-    return t_lst, f_lst, cenx_lst, ceny_lst, aperture, bkgmask
+    tesslc = TessLightCurve()
+    tesslc.t_lst         = t_lst
+    tesslc.q_lst         = q_lst
+    tesslc.flux_lst      = f_lst
+    tesslc.cenx_lst      = cenx_lst
+    tesslc.ceny_lst      = ceny_lst
+    tesslc.tcorr_lst     = data1['TIMECORR']
+    tesslc.pos_corr1_lst = data1['POS_CORR1']
+    tesslc.pos_corr2_lst = data1['POS_CORR2']
+    tesslc.shape = data2.shape
+    tesslc.aperture = aperture
+    tesslc.bkgmask = bkgmask
+
+    return tesslc
 
 def read_tp(filename):
     hdulst = fits.open(filename)
@@ -98,13 +113,14 @@ def read_tp(filename):
     data2 = hdulst[2].data
     hdulst.close()
 
-    mask1 = data1['QUALITY']==0
-    mask2 = ~np.isnan(data1['TIME'])
-    data1 = data1[mask1*mask2]
+    #mask1 = data1['QUALITY']==0
+    #mask2 = ~np.isnan(data1['TIME'])
+    #data1 = data1[mask1*mask2]
+    t_lst      = data1['TIME']
+    q_lst     = data1['QUALITY']
+    image_lst = data1['FLUX']
     aperture = data2&2>0
 
-    t_lst = data1['TIME']
-    image_lst = data1['FLUX']
     ny, nx = image_lst[0].shape
 
     wcs_input_dict = {
@@ -127,4 +143,4 @@ def read_tp(filename):
         }
     wcoord = WCS(wcs_input_dict)
 
-    return t_lst, image_lst, aperture, wcoord
+    return t_lst, q_lst, image_lst, aperture, wcoord
