@@ -12,11 +12,12 @@ from astropy.wcs import WCS
 from astroquery.mast import Tesscut
 
 from .tesscutimage import TesscutImage
+from .tesslightcurve import TessLightCurve
 from .aperture import Aperture
 from .visual import Tesscut_LC, Tesscut_Skyview, LC_PDM, make_movie
 from .periodogram import GLS
 
-class TessLightCurve(object):
+class TessExtractor(object):
 
     def __init__(self, target, sector=None, xsize=15, ysize=15, aperture=None):
 
@@ -38,7 +39,7 @@ class TessLightCurve(object):
         # set the aperture center
         self.aperture_center = (y0, x0)
 
-        self.aperture_mask = np.zeros((tesscutimg.ny, tesscutimg.nx))
+        self.aperture_mask = np.zeros((tesscutimg.ny, tesscutimg.nx), dtype=bool)
         cy = self.aperture.center[0]
         cx = self.aperture.center[1]
 
@@ -85,7 +86,7 @@ class TessLightCurve(object):
         # find the first layer that QUALITY flag==0
         i = np.nonzero(self.tesscutimg.q_lst==0)[0][0]
         fluximg = self.tesscutimg.fluxarray[i]
-        bkgmask = fluximg < np.percentile(fluximg, 50)
+        bkgmask = fluximg < np.percentile(fluximg, 35)
         bkgmask = bkgmask*(~objmask)
         nbkg = bkgmask.sum()
         self.tesscutimg.set_bkgmask(bkgmask)
@@ -100,8 +101,16 @@ class TessLightCurve(object):
             xsum = (fluximg*aperture).sum(axis=0)
             ysum = (fluximg*aperture).sum(axis=1)
             # calculate barycenter
-            cenx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
-            ceny = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
+            if xsum.sum()==0.0:
+                cenx = np.NaN
+            else:
+                cenx = (xsum*np.arange(self.tesscutimg.nx)).sum()/(xsum.sum())
+
+            if ysum.sum()==0.0:
+                ceny = np.NaN
+            else:
+                ceny = (ysum*np.arange(self.tesscutimg.ny)).sum()/(ysum.sum())
+
             fluxsum = (aperture*fluximg).sum()
             mean_bkg = (bkgmask*fluximg).sum()/nbkg
             bkg = mean_bkg*nobj
@@ -111,19 +120,20 @@ class TessLightCurve(object):
             cenx_lst.append(cenx)
             ceny_lst.append(ceny)
 
-        self.t_lst = np.array(t_lst)
-        self.q_lst = np.array(q_lst)
-        self.fluxsum_lst = np.array(fluxsum_lst)
-        self.bkg_lst  = np.array(bkg_lst)
-        self.cenx_lst  = np.array(cenx_lst)# - self.aperture_center[1]
-        self.ceny_lst  = np.array(ceny_lst)# - self.aperture_center[0]
-        self.flux_lst = self.fluxsum_lst - self.bkg_lst
-        self.tcorr_lst     = self.tesscutimg.table['TIMECORR']
-        self.pos_corr1_lst = self.tesscutimg.table['POS_CORR1']
-        self.pos_corr2_lst = self.tesscutimg.table['POS_CORR2']
+        tesslc = TessLightCurve()
+        tesslc.t_lst = np.array(t_lst)
+        tesslc.q_lst = np.array(q_lst)
+        tesslc.fluxsum_lst = np.array(fluxsum_lst)
+        tesslc.bkg_lst  = np.array(bkg_lst)
+        tesslc.cenx_lst  = np.array(cenx_lst)# - self.aperture_center[1]
+        tesslc.ceny_lst  = np.array(ceny_lst)# - self.aperture_center[0]
+        tesslc.flux_lst = tesslc.fluxsum_lst - tesslc.bkg_lst
+        tesslc.tcorr_lst     = self.tesscutimg.table['TIMECORR']
+        tesslc.pos_corr1_lst = self.tesscutimg.table['POS_CORR1']
+        tesslc.pos_corr2_lst = self.tesscutimg.table['POS_CORR2']
 
         # find cadence in minutes
-        dt = np.median(np.diff(self.t_lst))*24*60
+        dt = np.median(np.diff(tesslc.t_lst))*24*60
         if abs(dt-2)<0.1:
             self.cadence = 2
         elif abs(dt-10)<0.1:
@@ -133,9 +143,12 @@ class TessLightCurve(object):
         else:
             self.cadence = 0
 
-        #videoname = 'tesscutmovie_{:011d}_s{:04d}_{}_{}.mp4'.format(
-        #        self.tic, sector, camera, ccd)
-        #make_movie(self, tesscutimg, videoname)
+        # set aperture mask
+        tesslc.shape    = (self.tesscutimg.ny, self.tesscutimg.nx)
+        tesslc.aperture = self.tesscutimg.aperture
+        tesslc.bkgmask  = self.tesscutimg.bkgmask
+
+        return tesslc
 
     def get_pdm(self):
         """Get periodogram.
@@ -143,35 +156,6 @@ class TessLightCurve(object):
         m = self.q_lst==0
         self.pdm = GLS(self.t_lst[m], self.flux_lst[m])
 
-    def save_fits(self, filename):
-        """Save the light curve into FITS file.
-
-        Args:
-            filename (str): Filename of output FITS.
-        """
-
-        lc_table = Table()
-        lc_table.add_column(self.t_lst,     name='TIME')
-        lc_table.add_column(self.tcorr_lst, name='TIMECORR')
-        lc_table.add_column(self.flux_lst,  name='SAP_FLUX')
-        lc_table.add_column(self.bkg_lst,   name='SAP_BKG')
-        lc_table.add_column(self.q_lst,     name='QUALITY')
-        lc_table.add_column(self.cenx_lst,  name='MOM_CENTR1')
-        lc_table.add_column(self.ceny_lst,  name='MOM_CENTR2')
-        lc_table.add_column(self.pos_corr1_lst, name='POS_CORR1')
-        lc_table.add_column(self.pos_corr2_lst, name='POS_CORR2')
-
-        aperture_mask = np.ones((self.tesscutimg.ny, self.tesscutimg.nx),
-                            dtype=np.int32)
-        aperture_mask += np.int32(self.tesscutimg.aperture)*2
-        aperture_mask += np.int32(self.tesscutimg.bkgmask)*4
-
-        hdulst = fits.HDUList([
-                    fits.PrimaryHDU(),
-                    fits.BinTableHDU(data=lc_table),
-                    fits.ImageHDU(data=aperture_mask),
-                    ])
-        hdulst.writeto(filename, overwrite=True)
 
     def plot_tesscut_lc(self, figname=None):
         if figname is None:
