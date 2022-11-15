@@ -744,7 +744,7 @@ class TpComplex(Figure):
             image_lst = np.array(newimage_lst)
 
         # determine best frame to be displayed
-        m1 = tesslc.q_lst==0
+        m1 = (tesslc.q_lst==0)*(~np.isnan(tesslc.t_lst))
         medf = np.median(tesslc.flux_lst[m1])
         idx1 = np.abs(tesslc.flux_lst[m1] - medf).argmin()
         t = tesslc.t_lst[m1][idx1]
@@ -818,7 +818,7 @@ class TpComplex(Figure):
 
         ################## plot lc ############################
         axlc = self.add_axes([0.33, 0.28, 0.36, 0.21])
-        m1  = tesslc.q_lst==0
+        m1  = (tesslc.q_lst==0)*(~np.isnan(tesslc.t_lst))
         axlc.plot(tesslc.t_lst[m1], tesslc.flux_lst[m1], 'o', c='C0',
                 mew=0, alpha=0.5, ms=1)
         # plot a vertical dash line to indidate the time of tesscut image
