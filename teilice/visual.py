@@ -762,8 +762,6 @@ class TpComplex(Figure):
         for (x1, y1, x2, y2) in bound_lst:
             ax.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-', lw=1)
 
-        #mask = tictable['Tmag']<18
-        #newtictable = tictable[mask]
         newtictable = self.tictable
         tmag_lst = newtictable['Tmag']
         ra_lst  = newtictable['RAJ2000']

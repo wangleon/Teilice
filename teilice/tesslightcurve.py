@@ -2,8 +2,13 @@ import numpy as np
 import astropy.io.fits as fits
 from astropy.table import Table
 
+from . import utils
+
 class TessLightCurve(object):
     def __int__(self):
+        pass
+
+    def get_tictable(self):
         pass
 
     def save_fits(self, filename):
