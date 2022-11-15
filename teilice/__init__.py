@@ -1,3 +1,4 @@
+from . import utils
 from . import periodogram
 from . import tessdata
 from .tesstarget import TessTarget
