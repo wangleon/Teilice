@@ -14,8 +14,7 @@ from astroquery.mast import Tesscut
 from .tesscutimage import TesscutImage
 from .tesslightcurve import TessLightCurve
 from .aperture import Aperture
-from .visual import Tesscut_LC, Tesscut_Skyview, LC_PDM, make_movie
-from .periodogram import GLS
+from .visual import Tesscut_LC, Tesscut_Skyview, make_movie
 
 class TessExtractor(object):
 
@@ -121,6 +120,8 @@ class TessExtractor(object):
             ceny_lst.append(ceny)
 
         tesslc = TessLightCurve()
+        tesslc.target = self.target
+        tesslc.sector = self.sector
         tesslc.t_lst = np.array(t_lst)
         tesslc.q_lst = np.array(q_lst)
         tesslc.fluxsum_lst = np.array(fluxsum_lst)
@@ -136,51 +137,39 @@ class TessExtractor(object):
         dt = np.median(np.diff(tesslc.t_lst))*24*60
         if abs(dt-2)<0.1:
             self.cadence = 2
+        elif abs(dt-3.33)<0.1:
+            self.cadence = 10/3
         elif abs(dt-10)<0.1:
             self.cadence = 10
         elif abs(dt-30)<0.1:
             self.cadence = 30
         else:
             self.cadence = 0
+        tesslc.cadence = self.cadence
 
         # set aperture mask
         tesslc.shape    = (self.tesscutimg.ny, self.tesscutimg.nx)
         tesslc.aperture = self.tesscutimg.aperture
         tesslc.bkgmask  = self.tesscutimg.bkgmask
 
+        self.tesslc = tesslc
         return tesslc
 
-    def get_pdm(self):
-        """Get periodogram.
-        """
-        m = self.q_lst==0
-        self.pdm = GLS(self.t_lst[m], self.flux_lst[m])
-
-
-    def plot_tesscut_lc(self, figname=None):
+    def plot_tesscut_lc(self, tesslc, figname=None):
         if figname is None:
             figname = 'tesscut_{:011d}_s{:04d}.png'.format(
                         self.target.tic, self.sector)
 
-        fig = Tesscut_LC(self, figsize=(12, 5), dpi=200)
+        fig = Tesscut_LC(self, tesslc, figsize=(12, 5), dpi=200)
         fig.savefig(figname)
         fig.close()
 
-    def plot_tesscut_skyview(self, figname=None):
+    def plot_tesscut_skyview(self, tesslc, figname=None):
         if figname is None:
             figname = 'tesscut_skyview_{:011d}_s{:04d}.png'.format(
                         self.target.tic, self.sector)
 
-        fig = Tesscut_Skyview(self, figsize=(12, 5), dpi=200)
-        fig.savefig(figname)
-        fig.close()
-
-    def plot_lc_pdm(self, figname=None):
-        if figname is None:
-            figname = 'tesslc_pdm_{:011d}_s{:04d}.png'.format(
-                        self.target.tic, self.sector)
-
-        fig = LC_PDM(self, figsize=(12, 6), dpi=200)
+        fig = Tesscut_Skyview(self, tesslc, figsize=(12, 5), dpi=200)
         fig.savefig(figname)
         fig.close()
 

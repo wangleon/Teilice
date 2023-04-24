@@ -2,7 +2,9 @@ import numpy as np
 import astropy.io.fits as fits
 from astropy.table import Table
 
+from .periodogram import GLS
 from . import utils
+from .visual import LC_PDM
 
 class TessLightCurve(object):
     def __int__(self):
@@ -39,3 +41,18 @@ class TessLightCurve(object):
                     fits.ImageHDU(data=aperture_mask),
                     ])
         hdulst.writeto(filename, overwrite=True)
+
+    def get_pdm(self):
+        """Get periodogram.
+        """
+        m = self.q_lst==0
+        self.pdm = GLS(self.t_lst[m], self.flux_lst[m])
+
+    def plot_lc_pdm(self, figname=None):
+        if figname is None:
+            figname = 'tesslc_pdm_{:011d}_s{:04d}.png'.format(
+                        self.target.tic, self.sector)
+
+        fig = LC_PDM(self, figsize=(12, 6), dpi=200)
+        fig.savefig(figname)
+        fig.close()

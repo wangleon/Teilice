@@ -85,7 +85,7 @@ class TessTarget(object):
         self.gaiarow = info['gaiarow']
 
         # get nearby stars
-        #self.get_nearbystars()
+        self.get_nearbystars()
 
     def get_nearbystars(self, r=250, cache_path=NEARBY_PATH):
         """Query nearby stars within given radius.

@@ -18,7 +18,7 @@ from astroquery.skyview import SkyView
 from astroquery.vizier import Vizier
 
 from . import periodogram
-from .tessdata import read_lc, read_tp
+#from .tessdata import read_lc, read_tp
 
 def find_best_bc(bcx_lst, bcy_lst):
     bcx_med = np.median(bcx_lst)
@@ -60,11 +60,11 @@ def get_circle(ra0, dec0, r):
     return np.rad2deg(alpha)%360, np.rad2deg(delta)
 
 class Tesscut_LC(Figure):
-    def __init__(self, tesslc, *args, **kwargs):
+    def __init__(self, extractor, tesslc, *args, **kwargs):
         Figure.__init__(self, *args, **kwargs)
         self.canvas = FigureCanvasAgg(self)
 
-        tesscutimg = tesslc.tesscutimg
+        tesscutimg = extractor.tesscutimg
         ax1 = self.add_axes([0.06, 0.10, 0.40, 0.80],
                     projection=tesscutimg.wcoord)
         ax2 = self.add_axes([0.58, 0.66, 0.38, 0.23])
@@ -73,7 +73,7 @@ class Tesscut_LC(Figure):
         axc = self.add_axes([0.45, 0.10, 0.01, 0.80])
 
         m = tesslc.q_lst==0
-        i = find_best_bc(tesslc.bcx_lst[m], tesslc.bcy_lst[m])
+        i = find_best_bc(tesslc.cenx_lst[m], tesslc.ceny_lst[m])
 
         cax = ax1.imshow(tesscutimg.fluxarray[m][i],
                 vmin=tesscutimg.vmin, vmax=tesscutimg.vmax, cmap='YlGnBu_r')
@@ -93,7 +93,7 @@ class Tesscut_LC(Figure):
         ax1.grid(True, color='w', ls='--', lw=0.5)
 
         # plot nearby stars
-        tictable = tesslc.target.tictable
+        tictable = extractor.target.tictable
         mask = tictable['Tmag']<16
         newtictable = tictable[mask]
         tmag_lst = newtictable['Tmag']
@@ -116,17 +116,17 @@ class Tesscut_LC(Figure):
         self.colorbar(cax, cax=axc)
 
         # plot light curve
-        ax2.plot(tesslc.t_lst[m], tesslc.flux_lst[m], 'o', c='C0',
-                ms=1, mew=0, alpha=0.6, label='Flux')
+        ax2.plot(tesslc.t_lst[m], tesslc.flux_lst[m]+tesslc.bkg_lst[m], 'o', c='C0',
+                ms=1, mew=0, alpha=0.6, label='Total Flux')
         ax2.plot(tesslc.t_lst[m], tesslc.bkg_lst[m], 'o', c='C1',
                 ms=1, mew=0, alpha=0.6, label='Background')
-        ax3.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], 'o', c='C2',
+        ax3.plot(tesslc.t_lst[m], tesslc.flux_lst[m], 'o', c='C2',
                 ms=1, mew=0, alpha=0.6, label='Corrected Flux')
 
         # plot barycenter movement
-        ax4.plot(tesslc.t_lst[m], tesslc.bcx_lst[m], 'o', c='C0',
+        ax4.plot(tesslc.t_lst[m], tesslc.cenx_lst[m], 'o', c='C0',
                 ms=0.5, mew=0, alpha=0.6)
-        ax4.plot(tesslc.t_lst[m], tesslc.bcy_lst[m], 'o', c='C1',
+        ax4.plot(tesslc.t_lst[m], tesslc.ceny_lst[m], 'o', c='C1',
                 ms=0.5, mew=0, alpha=0.6)
         #ax2.legend(loc='upper left')
         #ax3.legend()
@@ -144,7 +144,7 @@ class Tesscut_LC(Figure):
 
         title = ('TIC {0.tic}'
                  ' (RA={0.ra:9.5f}, Dec={0.dec:+9.5f}, Tmag={0.tmag:.2f})'
-                 ' Sector {1.sector}').format(tesslc.target, tesslc)
+                 ' Sector {1.sector}').format(extractor.target, extractor)
         self.suptitle(title)
 
     def close(self):
@@ -152,16 +152,16 @@ class Tesscut_LC(Figure):
 
 class Tesscut_Skyview(Figure):
 
-    def __init__(self, tesslc, *args, **kwargs):
+    def __init__(self, extractor, tesslc, *args, **kwargs):
         Figure.__init__(self, *args, **kwargs)
         self.canvas = FigureCanvasAgg(self)
 
-        tesscutimg = tesslc.tesscutimg
+        tesscutimg = extractor.tesscutimg
         ax1 = self.add_axes([0.06, 0.10, 0.40, 0.80],
                     projection=tesscutimg.wcoord)
 
         m = tesslc.q_lst==0
-        i = find_best_bc(tesslc.bcx_lst[m], tesslc.bcy_lst[m])
+        i = find_best_bc(tesslc.cenx_lst[m], tesslc.ceny_lst[m])
 
         cax = ax1.imshow(tesscutimg.fluxarray[m][i],
                 vmin=tesscutimg.vmin, vmax=tesscutimg.vmax, cmap='YlGnBu_r')
@@ -181,7 +181,7 @@ class Tesscut_Skyview(Figure):
         ax1.grid(True, color='w', ls='--', lw=0.5)
 
         # plot nearby stars
-        tictable = tesslc.target.tictable
+        tictable = extractor.target.tictable
         mask = tictable['Tmag']<16
         newtictable = tictable[mask]
         tmag_lst = newtictable['Tmag']
@@ -202,8 +202,8 @@ class Tesscut_Skyview(Figure):
         ycoords.set_axislabel('Dec (deg)')
 
         # get sky image of nearby region
-        radius = max(tesslc.xsize, tesslc.ysize)*2*21  # in unit of arcsec
-        paths = SkyView.get_images(position=tesslc.target.coord, survey='DSS',
+        radius = max(extractor.xsize, extractor.ysize)*2*21  # in unit of arcsec
+        paths = SkyView.get_images(position=extractor.target.coord, survey='DSS',
                 radius  = radius*u.arcsec,
                 sampler ='Clip',
                 scaling = 'Log',
@@ -221,15 +221,15 @@ class Tesscut_Skyview(Figure):
         ax2.imshow(data, cmap='gray_r')
 
         # plot pixel grid
-        for iy in np.arange(-0.5, tesslc.ysize, 1):
-            x_lst = [-0.5, tesslc.xsize-0.5]
+        for iy in np.arange(-0.5, extractor.ysize, 1):
+            x_lst = [-0.5, extractor.xsize-0.5]
             y_lst = [iy, iy]
             ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
             x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
             ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
-        for ix in np.arange(-0.5, tesslc.xsize, 1):
+        for ix in np.arange(-0.5, extractor.xsize, 1):
             x_lst = [ix, ix]
-            y_lst = [-0.5, tesslc.ysize-0.5]
+            y_lst = [-0.5, extractor.ysize-0.5]
             ra_lst, dec_lst = tesscutimg.wcoord.all_pix2world(x_lst, y_lst, 0)
             x2_lst, y2_lst = wcoord2.all_world2pix(ra_lst, dec_lst, 0)
             ax2.plot(x2_lst, y2_lst, 'b-', lw=0.3)
@@ -261,7 +261,7 @@ class Tesscut_Skyview(Figure):
 
         title = ('TIC {0.tic}'
                  ' (RA={0.ra:9.5f}, Dec={0.dec:+9.5f}, Tmag={0.tmag:.2f})'
-                 ' Sector {1.sector}').format(tesslc.target, tesslc)
+                 ' Sector {1.sector}').format(extractor.target, extractor)
         self.suptitle(title)
 
     def close(self):
@@ -275,7 +275,7 @@ class LC_PDM(Figure):
         ax2 = self.add_axes([0.08, 0.10, 0.30, 0.32])
 
         m = tesslc.q_lst==0
-        ax1.plot(tesslc.t_lst[m], tesslc.fluxcorr_lst[m], 'o', c='C0',
+        ax1.plot(tesslc.t_lst[m], tesslc.flux_lst[m], 'o', c='C0',
                 ms=2, mew=0, alpha=0.8)
         ax1.set_xlabel('Time (BJD-2457000)')
         ax1.set_ylabel('Flux')
@@ -285,7 +285,7 @@ class LC_PDM(Figure):
         ax1.xaxis.set_major_locator(tck.MultipleLocator(5))
         ax1.xaxis.set_minor_locator(tck.MultipleLocator(1))
 
-        meanf = tesslc.fluxcorr_lst[m].mean()
+        meanf = tesslc.flux_lst[m].mean()
         y1, y2 = ax1.get_ylim()
         yy1 = y1/meanf
         yy2 = y2/meanf
