@@ -8,6 +8,9 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astroquery.vizier import Vizier
 from astroquery.mast import Tesscut
+from astropy.units import UnitsWarning
+import warnings
+warnings.filterwarnings('ignore', category=UnitsWarning, append=True)
 
 from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH
 
