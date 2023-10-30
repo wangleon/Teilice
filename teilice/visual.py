@@ -1210,3 +1210,6 @@ class TpComplex(Figure):
   
         self.text(0.02, 0.48, '\n'.join(text_lst), fontsize=7,
                 ha='left', va='top', fontfamily='monospace')
+
+    def close(self):
+        plt.close(self)
