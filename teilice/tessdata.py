@@ -1,7 +1,10 @@
 import os
+import re
 import numpy as np
 import astropy.io.fits as fits
 from astropy.wcs import WCS
+
+from . import common as cm
 
 #from .tesslightcurve import TessLightCurve
 
@@ -153,3 +156,33 @@ def read_tp(filename):
     wcoord = WCS(wcs_input_dict)
 
     return t_lst, q_lst, image_lst, aperture, wcoord
+
+def make_twomin_target_lst():
+
+    pattern = '[a-zA-Z\-\s]+tess(\d{13})\-s(\d{4})\-(\d{16})\-\d{4}\-s_lc\.fits'
+
+    path = os.path.join(cm.DOWNSCRIPT_PATH, 'sector')
+    tic_lst = {}
+    for fname in sorted(os.listdir(path)):
+        mobj = re.match('tesscurl_sector_(\d+)_lc\.sh', fname)
+        if mobj:
+            sector = int(mobj.group(1))
+            filename = os.path.join(path, fname)
+            infile = open(filename)
+            for row in infile:
+                mobj2 = re.match(pattern, row)
+                if mobj2:
+                    tic = int(mobj2.group(3))
+                    if tic not in tic_lst:
+                        tic_lst[tic] = []
+                    tic_lst[tic].append(sector)
+            infile.close()
+
+    # write the index to file
+    outfilename = os.path.join(cm.CACHE_PATH, 'tess_targets_2min.dat')
+    outfile = open(outfilename, 'w')
+    for tic, sector_lst in sorted(tic_lst.items()):
+        outfile.write('{:11d}:'.format(tic))
+        string_lst = [str(s) for s in sorted(sector_lst)]
+        outfile.write(','.join(string_lst)+os.linesep)
+    outfile.close()
