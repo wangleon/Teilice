@@ -4,6 +4,7 @@ from astropy.table import Table
 
 from .periodogram import GLS
 from . import utils
+from .tessdata import read_lc
 from .visual import LC_PDM
 
 class TessLightCurve(object):
@@ -12,6 +13,26 @@ class TessLightCurve(object):
 
     def get_tictable(self):
         pass
+
+    @staticmethod
+    def from_lc_file(lc_filename):
+        result = read_lc(lc_filename)
+
+        tesslc = TessLightCurve()
+        tesslc.t_lst        = result[0]
+        tesslc.q_lst        = result[1]
+        tesslc.flux_lst     = result[2]
+        tesslc.cenx_lst     = result[3]
+        tesslc.ceny_lst     = result[4]
+        tesslc.tcorr_lst    = result[5]
+        #tesslc.pos_corr1_lst = data1['POS_CORR1']
+        #tesslc.pos_corr2_lst = data1['POS_CORR2']
+        tesslc.shape        = result[6]
+        tesslc.aperture     = result[7]
+        tesslc.bkgmask      = result[8]
+
+        return tesslc
+
 
     def save_fits(self, filename):
         """Save the light curve into FITS file.

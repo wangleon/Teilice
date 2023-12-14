@@ -18,7 +18,7 @@ from astroquery.skyview import SkyView
 from astroquery.vizier import Vizier
 
 from . import periodogram
-#from .tessdata import read_lc, read_tp
+from .tessdata import read_lc, read_tp
 
 def find_best_bc(bcx_lst, bcy_lst):
     bcx_med = np.median(bcx_lst)
@@ -690,7 +690,7 @@ class TpComplex(Figure):
                 imagetype='tp',
                 fluxkey='PDCSAP_FLUX'):
 
-        Figure.__init__(self, figsize=(12, 5.5))
+        Figure.__init__(self, figsize=(12, 5.5), dpi=300)
         self.canvas = FigureCanvasAgg(self)
 
         self.tic  = tic

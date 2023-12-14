@@ -2,6 +2,7 @@ from . import utils
 from . import periodogram
 from . import tessdata
 from .tesstarget import TessTarget
+from .tesslightcurve import TessLightCurve
 from .tessextractor import TessExtractor
 from .tesscutimage import TesscutImage
 from . import visual
