@@ -748,10 +748,15 @@ class TpComplex(Figure):
 
         # determine best frame to be displayed
         m1 = (lcdata.q_lst==0)*(~np.isnan(lcdata.t_lst))
+        # find the median flux value
         medf = np.median(lcdata.flux_lst[m1])
+        # find the index of the frame that closest to the median flux value
         idx1 = np.abs(lcdata.flux_lst[m1] - medf).argmin()
+        # find the time of the frame that closest to the median flux value
         t = lcdata.t_lst[m1][idx1]
-        idx = np.abs(lcdata.t_lst[m1] - t).argmin()
+        # on lcdata, find the index of the frame that closes to the time of
+        # median flux
+        idx = np.abs(t_lst[m2] - t).argmin()
         image = image_lst[m2][idx]
         ny, nx = image.shape
 

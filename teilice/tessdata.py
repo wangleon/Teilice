@@ -132,7 +132,7 @@ def read_tp(filename):
     #mask1 = data1['QUALITY']==0
     #mask2 = ~np.isnan(data1['TIME'])
     #data1 = data1[mask1*mask2]
-    t_lst      = data1['TIME']
+    t_lst     = data1['TIME']
     q_lst     = data1['QUALITY']
     image_lst = data1['FLUX']
     aperture = data2&2>0
