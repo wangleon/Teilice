@@ -72,6 +72,10 @@ def read_2min_lc_backup(tic, sector_lst, lc_path):
         lc_lst[sector] = (t_lst, f_lst)
     return lc_lst
 
+class TessLightCurve(object):
+    def __int__(self):
+        pass
+
 def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     hdulst = fits.open(filename)
     data1 = hdulst[1].data
@@ -100,11 +104,13 @@ def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     aperture = data2&2>0
     bkgmask  = data2&4>0
 
-    '''
+    #return (t_lst, q_lst, flux_lst, cenx_lst, ceny_lst, tcorr_lst,
+    #        shape, aperture, bkgmask)
+
     tesslc = TessLightCurve()
     tesslc.t_lst         = t_lst
     tesslc.q_lst         = q_lst
-    tesslc.flux_lst      = f_lst
+    tesslc.flux_lst      = flux_lst
     tesslc.cenx_lst      = cenx_lst
     tesslc.ceny_lst      = ceny_lst
     tesslc.tcorr_lst     = data1['TIMECORR']
@@ -113,10 +119,8 @@ def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     tesslc.shape = data2.shape
     tesslc.aperture = aperture
     tesslc.bkgmask = bkgmask
-    '''
 
-    return (t_lst, q_lst, flux_lst, cenx_lst, ceny_lst, tcorr_lst,
-            shape, aperture, bkgmask)
+    return tesslc
 
 def read_tp(filename):
     hdulst = fits.open(filename)

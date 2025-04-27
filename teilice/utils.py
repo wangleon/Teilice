@@ -121,3 +121,99 @@ def download_all_sector_scripts():
             filename = os.path.join(cm.DOWNSCRIPT_PATH, 'sector', fname)
             if not os.path.exists(filename):
                 download_file(url, filename, show_progress=True)
+
+
+def get_sectorinfo(sector, filetype='lc'):
+
+    script_fname = 'tesscurl_sector_{}_{}.sh'.format(sector, filetype)
+    script_file = os.path.join(cm.DOWNSCRIPT_PATH, 'sector', script_fname)
+
+    ### open the download script file and find the timestamp and orbit number
+    file1 = open(script_file)
+    file1.readline()
+    row = file1.readline()
+    file1.close()
+
+    # get timestamp and orbit of this sector
+    mobj1 = re.match('[\s\S]+tess(\d+)\-s\d+\-\d+\-(\d+)\-\S+\.fits', row)
+    timestamp = int(mobj1.group(1))
+    orbit = int(mobj1.group(2))
+
+    return timestamp, orbit
+
+
+
+def download_data(tic, sector, filetype, datapool, show_progress=True):
+    script_fname = 'tesscurl_sector_{}_{}.sh'.format(sector, filetype)
+    script_file = os.path.join(cm.DOWNSCRIPT_PATH, 'sector', script_fname)
+
+    ### open the download script file and find the timestamp and orbit number
+    file1 = open(script_file)
+    file1.readline()
+    row = file1.readline()
+    file1.close()
+
+    # get timestamp and orbit of this sector
+    mobj1 = re.match('[\s\S]+tess(\d+)\-s\d+\-\d+\-(\d+)\-\S+\.fits', row)
+    timestamp = int(mobj1.group(1))
+    orbit = int(mobj1.group(2))
+
+    # get download URL
+    mobj2 = re.match('[\s\S]+(https:\/\/\S+)tess\d+\-s\d+\-\d+\-\d+\S+', row)
+    url = mobj2.group(1)
+
+    fname = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_{}.fits'.format(
+            timestamp, sector, tic, orbit, filetype)
+
+    full_url = url+fname
+
+    # check if target path exists
+    target_path = os.path.join(datapool, filetype, 's{:03d}'.format(sector))
+    if not os.path.exists(target_path):
+        os.mkdir(target_path)
+
+    filename = os.path.join(target_path, fname)
+
+    # download the data
+    download_file(full_url, filename, show_progress=show_progress)
+
+
+def download_lc(tic, sector, datapool, show_progress=True):
+    download_data(tic, sector, 'lc', datapool)
+
+def download_tp(tic, sector, datapool, show_progress=True):
+    download_data(tic, sector, 'tp', datapool)
+
+
+def make_target_lst():
+    tic_lst = {}
+
+    path1 = os.path.join(cm.DOWNSCRIPT_PATH, 'sector')
+    for fname in os.listdir(path1):
+        mobj = re.match('tesscurl_sector_(\d+)_lc.sh', fname)
+        if not mobj:
+            continue
+        sector = int(mobj.group(1))
+
+        filename = os.path.join(path1, fname)
+        file1 = open(filename)
+        for row in file1:
+            if len(row)==0 or row[0]=='#':
+                continue
+            mobj = re.match('[\s\S]+tess\d+\-s\d+\-(\d+)\-\d+\S+\.fits', row)
+            if mobj:
+                tic = int(mobj.group(1))
+                if tic not in tic_lst:
+                    tic_lst[tic] = []
+                tic_lst[tic].append(sector)
+        file1.close()
+
+    filename = os.path.join(cm.CACHE_PATH, 'tess_target_lc.dat')
+    outfile = open(filename, 'w')
+    for tic, sector_lst in sorted(tic_lst.items()):
+        outfile.write('{:11d}:'.format(tic))
+        string_lst = [str(s) for s in sorted(sector_lst)]
+        outfile.write(','.join(string_lst)+os.linesep)
+    outfile.close()
+
+    print('LC target list updated. N={}'.format(len(tic_lst)))
