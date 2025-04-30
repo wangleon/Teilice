@@ -716,6 +716,7 @@ class TpComplex(Figure):
         self.get_tictable()
         self.get_gaia2table()
         self.get_gaia3table()
+        self.get_gaia3vartable()
         self.get_skyview()
 
         self.plot_text()
@@ -735,7 +736,12 @@ class TpComplex(Figure):
         #t_lst, imgq_lst, image_lst, _, wcoord = read_tp(image_file)
         t_lst, imgq_lst, image_lst, _, wcoord = tpdata
         self.wcoord1 = wcoord
-        m2 = imgq_lst==0
+        nlayer, ny, nx = image_lst.shape
+
+        # mnan is to find the images that contains real-number pixels
+        # i.e., not all of the pixels in this frame is NaN
+        mnan = np.array([(~np.isnan(image_lst[i])).sum()>0 for i in np.arange(nlayer)])
+        m2 = (imgq_lst==0) * mnan
 
         # subtract background from TP file
         if imagetype=='tesscut':
@@ -817,6 +823,8 @@ class TpComplex(Figure):
             for x in range(x1, x2):
                 pixflux_lst = np.array(flux_lst[(x,y)])
                 mask = ~np.isnan(pixflux_lst)
+                if mask.sum()==0:
+                    continue
                 med = np.median(pixflux_lst[mask])
                 _w = 0.36/(x2-x1)
                 _h = 0.4/(y2-y1)
@@ -1119,6 +1127,32 @@ class TpComplex(Figure):
             gaia3table.write(gaia3tablename, format='votable', overwrite=True)
         self.gaia3table = gaia3table
 
+    def get_gaia3vartable(self):
+        if not os.path.exists(self.cache['gaia3']):
+            os.mkdir(self.cache['gaia3'])
+        ################ get gaia3 var table #####################
+        gaia3vartablename = os.path.join(self.cache['gaia3'],
+                        'gaia3var_nearby_{:012d}_180.vot'.format(self.tic))
+        if os.path.exists(gaia3vartablename):
+            gaia3vartable = Table.read(gaia3vartablename)
+        else:
+            catid = 'I/358/vclassre'
+            viz = Vizier(catalog=catid, columns=['**', '+_r'])
+            viz.ROW_LIMIT = -1
+            tablelist = viz.query_region(self.coord, radius=180*u.arcsec)
+            if len(tablelist)>0:
+                gaia3vartable = tablelist[catid]
+            else:
+                # generate an empty table
+                viz = Vizier(catalog=catid, columns=['**'])
+                viz.ROW_LIMIT = 10
+                tablelist = viz.query_constraints()
+                tab = tablelist[catid]
+                m = [False]*len(tab)
+                gaia3vartable = tab[m]
+            gaia3vartable.write(gaia3vartablename, format='votable', overwrite=True)
+        self.gaia3vartable = gaia3vartable
+
     def plot_gaia3var(self, *args, **kwargs):
         #catid = 'I/358/varisum'
         catid = 'I/358/vclassre'
@@ -1135,6 +1169,8 @@ class TpComplex(Figure):
                     name='Sol'
                 elif name=='DSCT|GDOR|SXPHE':
                     name='D/G/S'
+                elif name=='ACV|CP|MCP|ROAM|ROAP|SXARI':
+                    name='ACV...'
                 cl_lst.append(name)
             self.plot_scatters(ra_lst, de_lst, *args, **kwargs)
             self.add_texts(ra_lst, de_lst, cl_lst, xoff=3, yoff=5,
@@ -1214,9 +1250,70 @@ class TpComplex(Figure):
     def plot_text(self):
         tictable = self.tictable
         gaia2table = self.gaia2table
+        gaia3vartable = self.gaia3vartable
         tmag = self.tmag
 
         ######### get star catalog to be dispalyed ##############
+        #### add gaia3 var
+        text3_lst = []
+        important_tic_lst = {}
+        text3_lst.append('Gaia DR3 variable catalog:')
+        fmtstr = '{:>5s} {:>3s} {:>11s} {:>19s} {:7s} {:7s}'
+        text = fmtstr.format('r (")', 'PA', 'TIC', 'Gaia DR3', 'vartype', 'Period')
+        text3_lst.append(text)
+        ticcoord = SkyCoord(tictable['RAJ2000'], tictable['DEJ2000'], unit='deg')
+        for irow, gaia3varrow in enumerate(gaia3vartable):
+            _r     = gaia3varrow['_r']
+            _gaia3 = gaia3varrow['Source']
+            _ra    = gaia3varrow['RA_ICRS']
+            _dec   = gaia3varrow['DE_ICRS']
+            _pa    = self.coord.position_angle(
+                        SkyCoord(_ra, _dec, unit='deg')
+                        ).degree
+            _pa = str(int(round(_pa)))
+            _class = gaia3varrow['Class']
+            if _class == 'SOLAR_LIKE':
+                _class = 'Sol'
+            elif _class == 'DSCT|GDOR|SXPHE':
+                _class = 'D/G/S'
+            elif _class == 'ACV|CP|MCP|ROAM|ROAP|SXARI':
+                _class = 'ACV...'
+
+            ### find period
+            if _class == 'ECL':
+                catid = 'I/358/veb'
+                column_filter = {'Source':'={}'.format(_gaia3)}
+                viz = Vizier(catalog=catid, columns=['**'],
+                        column_filters=column_filter)
+                tablelist = viz.query_constraints()
+                tab = tablelist[catid]
+                if tab is not None and len(tab)>0:
+                    _row = tab[0]
+                    _period = '{:7.2f}'.format(1/_row['Freq'])
+                else:
+                    _period = ''
+            else:
+                _period = ''
+
+            ## match TIC
+            _coord = SkyCoord(_ra, _dec, unit='deg')
+            _sep = ticcoord.separation(_coord)
+            m = _sep.arcsec<1.0
+            if m.sum()>0:
+                _tic = '{:11d}'.format(tictable[m][0]['TIC'])
+                #_pa = self.coord.position_angle(_coord).degree
+                #_pa = str(int(round(_pa)))
+                important_tic_lst[int(_tic)] = _class
+            else:
+                _tic = ''
+                #_pa = ''
+
+            text = fmtstr.format('{:5.1f}'.format(_r), _pa,
+                    _tic, str(_gaia3), _class, _period)
+            text3_lst.append(text)
+
+
+        #### add TIC v82 catalog
         # find nearby stars
         m1 = (tictable['_r']<10)*(tictable['Tmag']-tmag<3)
         if m1.sum()<=2:
@@ -1232,14 +1329,19 @@ class TpComplex(Figure):
             m2 = (tictable['_r']<120)*(tictable['Tmag']<tmag+2)
         if m2.sum()>4:
             m2[np.nonzero(m2)[0][4:]] = False
-        m = m1 + m2
-    
-        text_lst = ['']
-        text_lst.append('TIC:')
-        fmtstr = '{:>5s} {:>3s} {:>11s} {:7s} {:>5s} {:>5s} {:>5s} {:>5s}'
+
+        # TIC in important_tic_lst
+        m3 = np.array([tic in important_tic_lst for tic in tictable['TIC']])
+        m = m1 + m2 + m3
+
+   
+
+        text1_lst = []
+        text1_lst.append('TIC v8.2:')
+        fmtstr = '{:>5s} {:>3s} {:>11s} {:7s} {:>5s} {:>5s} {:>5s} {:>5s} {:<14s}'
         text = fmtstr.format(
-                'r (")', 'PA', 'TIC', 'Gaia2', 'Tmag', 'Vmag', 'Kmag', 'V-K')
-        text_lst.append(text)
+                'r (")', 'PA', 'TIC', 'Gaia2', 'Tmag', 'Vmag', 'Kmag', 'V-K', 'note')
+        text1_lst.append(text)
     
         gaia2_lst = []
         for ticrow in tictable[m][0:8]:
@@ -1256,7 +1358,6 @@ class TpComplex(Figure):
     
             _r = '{:5.1f}'.format(_r)
             _pa = '{:3d}'.format(_pa)
-            _tic = '{:11d}'.format(_tic)
             if _gaia2 is np.ma.masked:
                 _gaia2 = ''
             else:
@@ -1277,17 +1378,26 @@ class TpComplex(Figure):
                 _vk = ''
             else:
                 _vk = '{:5.2f}'.format(_vk)
+
+            _note = ''
+            if len(ticrow['Disp'])>0:
+                _note += ticrow['Disp']+':'
+            if ticrow['m_TIC'] is not np.ma.masked:
+                _note += str(ticrow['m_TIC'])
+
+            if _tic in important_tic_lst:
+                _note += important_tic_lst[_tic]
     
             text = fmtstr.format(
-                    _r, _pa, _tic, _gaia2,  _tmag, _vmag, _kmag, _vk)
-            text_lst.append(text)
+                    _r, _pa, str(_tic), _gaia2,  _tmag, _vmag, _kmag, _vk, _note)
+            text1_lst.append(text)
     
-        text_lst.append('')
-        text_lst.append('Gaia DR2:')
+        text2_lst = []
+        text2_lst.append('Gaia DR2:')
         fmtstr = '{:>5s} {:>19s} {:>5s} {:>5s} {:>5s} {:>5s}'
         text = fmtstr.format(
-                'r (")', 'Source', 'Gmag', 'BP-RP', 'Plx', 'e_Plx')
-        text_lst.append(text)
+                'r (")', 'Gaia DR2', 'Gmag', 'BP-RP', 'Plx', 'e_Plx')
+        text2_lst.append(text)
         m = [row['Source'] in gaia2_lst for row in gaia2table]
         #m = gaia2table['_r']<10
         for gaiarow in gaia2table[m][0:8]:
@@ -1323,9 +1433,20 @@ class TpComplex(Figure):
     
             text = fmtstr.format(_r, _gaia2, _gmag, _bprp0,
                     _plx, _eplx)
+            text2_lst.append(text)
+
+        text_lst = []
+        for text in text1_lst:
             text_lst.append(text)
+        text_lst.append('')
+        for text in text2_lst:
+            text_lst.append(text)
+        text_lst.append('')
+        for text in text3_lst:
+            text_lst.append(text)
+
   
-        self.text(0.02, 0.48, '\n'.join(text_lst), fontsize=6,
+        self.text(0.02, 0.464, '\n'.join(text_lst), fontsize=5.5,
                 ha='left', va='top', fontfamily='monospace')
 
     def close(self):
