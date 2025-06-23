@@ -86,7 +86,7 @@ class TessTarget(object):
         #self.get_nearbystars()
 
     def __getattr__(self, item):
-        if item in ['ra', 'dec', 'tmag' 'coord', 'ticrow', 'gaiarow']:
+        if item in ['ra', 'dec', 'tmag', 'coord', 'ticrow', 'gaiarow']:
             info = get_sourceinfo(self.tic)
             self.ra   = info['ra']
             self.dec  = info['dec']
@@ -158,14 +158,29 @@ class TessTarget(object):
         return list(sector_table['sector'])
 
 
-
-    def get_lc(self, sector, auto_download=True, datapool=None):
+    def get_lc_filename(self, sector, datapool=None):
         timestamp, orbit = get_sectorinfo(sector)
         lcfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_lc.fits'.format(
                     timestamp, sector, self.tic, orbit)
         path = os.path.join(datapool, 'lc', 's{:03d}'.format(sector))
 
         lcfilename = os.path.join(path, lcfile)
+        return lcfilename
+
+    def get_tp_filename(self, sector, datapool=None):
+        
+        timestamp, orbit = get_sectorinfo(sector)
+        tpfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_tp.fits'.format(
+                    timestamp, sector, self.tic, orbit)
+        path = os.path.join(datapool, 'tp', 's{:03d}'.format(sector))
+
+        tpfilename = os.path.join(path, tpfile)
+        return tpfilename
+
+
+    def get_lc(self, sector, auto_download=True, datapool=None):
+        # get LC filename
+        lcfilename = self.get_lc_filename(sector, datapool=datapool)
 
         if not os.path.exists(lcfilename) and auto_download:
             download_lc(self.tic, sector, datapool)
@@ -174,12 +189,9 @@ class TessTarget(object):
         return lcdata
             
     def get_tp(self, sector, auto_download=True, datapool=None):
-        timestamp, orbit = get_sectorinfo(sector)
-        tpfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_tp.fits'.format(
-                    timestamp, sector, self.tic, orbit)
-        path = os.path.join(datapool, 'tp', 's{:03d}'.format(sector))
 
-        tpfilename = os.path.join(path, tpfile)
+        # get TP filename
+        tpfilename = self.get_tp_filename(sector, datapool=datapool)
 
         if not os.path.exists(tpfilename) and auto_download:
             download_tp(self.tic, sector, datapool)
