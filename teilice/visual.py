@@ -1055,11 +1055,15 @@ class TpComplex(Figure):
         self.ax3.set_ylim(_y1, _y2)
 
     def get_tictable(self):
-        if not os.path.exists(self.cache['tic']):
-            os.mkdir(self.cache['tic'])
+
+        path = os.path.join(self.cache['tic'], '{:02d}'.format(self.tic%100))
+        if not os.path.exists(path):
+            os.makedirs(path)
+
         ############## get tic table ##############
-        tictablename = os.path.join(self.cache['tic'],
-                        'tic_nearby_{:012d}_250.vot'.format(self.tic))
+
+        tictablename = os.path.join(path,
+                'tic_nearby_{:012d}_250.vot'.format(self.tic))
         if os.path.exists(tictablename):
             tictable = Table.read(tictablename)
         else:
@@ -1077,10 +1081,13 @@ class TpComplex(Figure):
         self.tictable = tictable
 
     def get_gaia2table(self):
-        if not os.path.exists(self.cache['gaia2']):
-            os.mkdir(self.cache['gaia2'])
+
+        path = os.path.join(self.cache['gaia2'], '{:02d}'.format(self.tic%100))
+        if not os.path.exists(path):
+            os.makedirs(path)
+
         ############## get gaia2 table #############
-        gaia2tablename = os.path.join(self.cache['gaia2'],
+        gaia2tablename = os.path.join(path,
                         'gaia2_nearby_{:012d}_150.vot'.format(self.tic))
         if os.path.exists(gaia2tablename):
             gaia2table = Table.read(gaia2tablename)
@@ -1094,10 +1101,9 @@ class TpComplex(Figure):
         self.gaia2table = gaia2table
 
     def get_gaiae3table(self):
-        if not os.path.exists(self.cache['gaiae3']):
-            os.mkdir(self.cache['gaiae3'])
+
         ############## get gaiae3 table #############
-        gaiae3tablename = os.path.join(self.cache['gaiae3'],
+        gaiae3tablename = os.path.join(path,
                         'gaiae3_nearby_{:012d}_150.vot'.format(self.tic))
         if os.path.exists(gaiae3tablename):
             gaiae3table = Table.read(gaiae3tablename)
@@ -1111,10 +1117,12 @@ class TpComplex(Figure):
         self.gaiae3table = gaiae3table
 
     def get_gaia3table(self):
-        if not os.path.exists(self.cache['gaia3']):
-            os.mkdir(self.cache['gaia3'])
+        path = os.path.join(self.cache['gaia3'], '{:02d}'.format(self.tic%100))
+        if not os.path.exists(path):
+            os.makedirs(path)
+
         ############## get gaia3 table #############
-        gaia3tablename = os.path.join(self.cache['gaia3'],
+        gaia3tablename = os.path.join(path,
                         'gaia3_nearby_{:012d}_150.vot'.format(self.tic))
         if os.path.exists(gaia3tablename):
             gaia3table = Table.read(gaia3tablename)
@@ -1128,10 +1136,12 @@ class TpComplex(Figure):
         self.gaia3table = gaia3table
 
     def get_gaia3vartable(self):
-        if not os.path.exists(self.cache['gaia3']):
-            os.mkdir(self.cache['gaia3'])
+        path = os.path.join(self.cache['gaia3'], '{:02d}'.format(self.tic%100))
+        if not os.path.exists(path):
+            os.makedirs(path)
+
         ################ get gaia3 var table #####################
-        gaia3vartablename = os.path.join(self.cache['gaia3'],
+        gaia3vartablename = os.path.join(path,
                         'gaia3var_nearby_{:012d}_180.vot'.format(self.tic))
         if os.path.exists(gaia3vartablename):
             gaia3vartable = Table.read(gaia3vartablename)
@@ -1177,20 +1187,26 @@ class TpComplex(Figure):
                     fontsize=4, color='C2', va='bottom', ha='left')
 
     def get_skyview(self):
-        if not os.path.exists(self.cache['skyview']):
-            os.mkdir(self.cache['skyview'])
+        path = os.path.join(self.cache['skyview'], '{:02d}'.format(self.tic%100))
+        if not os.path.exists(path):
+            os.makedirs(path)
+
+        print('getting skyview')
 
         ############## get large skyview image ###########
-        dss360_filename = os.path.join(self.cache['skyview'],
+        dss360_filename = os.path.join(path,
                         'skyview_dss_{:012d}_360.fits'.format(self.tic))
         if os.path.exists(dss360_filename):
             hdulst = fits.open(dss360_filename)
             dss360data = hdulst[0].data
             dss360head = hdulst[0].header
+            hdulst.close()
         else:
             # get large DSS image
             radius = 360  # in unit of arcsec
+            #print('Trying to download SkyView of', self.tic)
             for i in range(50):
+                #print('Trying number', i)
                 try:
                     paths = SkyView.get_images(position=self.coord,
                         survey  = 'DSS',
@@ -1206,13 +1222,14 @@ class TpComplex(Figure):
             hdulst.writeto(dss360_filename, overwrite=True)
             dss360data = hdu.data
             dss360head = hdu.header
+            #print('successful')
 
         self.dss360data = dss360data
         self.wcoord2 = WCS(dss360head)
 
         ############## get small skyview image ###########
         radius = 100 # in unit of arcsec
-        dsssmall_filename = os.path.join(self.cache['skyview'],
+        dsssmall_filename = os.path.join(path,
                 'skyview_dss_{:012d}_{:d}.fits'.format(self.tic, radius))
         if os.path.exists(dsssmall_filename):
             hdulst = fits.open(dsssmall_filename)
