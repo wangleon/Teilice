@@ -689,7 +689,8 @@ class TpComplex(Figure):
                 gaia2table_cache,
                 gaia3table_cache, skyview_cache,
                 imagetype='tp',
-                fluxkey='PDCSAP_FLUX'):
+                fluxkey='PDCSAP_FLUX',
+                plot_skyview=True):
 
         Figure.__init__(self, figsize=(12, 5.5), dpi=300)
         self.canvas = FigureCanvasAgg(self)
@@ -717,7 +718,8 @@ class TpComplex(Figure):
         self.get_gaia2table()
         self.get_gaia3table()
         self.get_gaia3vartable()
-        self.get_skyview()
+        if plot_skyview:
+            self.get_skyview()
 
         self.plot_text()
 
@@ -882,125 +884,125 @@ class TpComplex(Figure):
         axbcx.set_ylabel('X', fontsize=7, color='C1')
         axbcy.set_ylabel('Y', fontsize=7, color='C2')
 
-        ############## plot large skyview ############
-
-        ax2 = self.add_axes([0.67, 0.52, 0.4, 0.4], projection=self.wcoord2)
-        ax2.imshow(self.dss360data, cmap='gray_r')
-        self.ax2 = ax2
-
-        # plot pixel grid
-        for iy in np.arange(-0.5, ny, 1):
-            x_lst = [-0.5, nx-0.5]
-            y_lst = [iy, iy]
-            ra_lst, dec_lst = wcoord.all_pix2world(x_lst, y_lst, 0)
-            x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
-            ax2.plot(x2_lst, y2_lst, '-', c='b', lw=0.3)
-        for ix in np.arange(-0.5, nx, 1):
-            x_lst = [ix, ix]
-            y_lst = [-0.5, ny-0.5]
-            ra_lst, dec_lst = wcoord.all_pix2world(x_lst, y_lst, 0)
-            x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
-            ax2.plot(x2_lst, y2_lst, '-', c='b', lw=0.3)
-
-        # plot aperture
-        bound_lst = get_aperture_bound(lcdata.aperture)
-        for (x1, y1, x2, y2) in bound_lst:
-            ra_lst, dec_lst = wcoord.all_pix2world(
-                    [x1-0.5,x2-0.5], [y1-0.5,y2-0.5], 0)
-            x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
-            ax2.plot(x2_lst, y2_lst,  'r-', lw=0.7)
-        
-        # plot x and y arrows
-        for x_lst, y_lst in [([-1.0, +1.5], [-1.0, -1.0]),
-                             ([-1.0, -1.0], [-1.0, +1.5])]:
-            ra_lst, dec_lst = wcoord.all_pix2world(x_lst, y_lst, 0)
-            x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
-            x, dx = x2_lst[0], x2_lst[1]-x2_lst[0]
-            y, dy = y2_lst[0], y2_lst[1]-y2_lst[0]
-            ax2.arrow(x, y, dx, dy, width=1, color='k', lw=0, head_width=5,
-                    head_length=10)
-        _ra, _dec = wcoord.all_pix2world(2.5, -1, 0)
-        _x, _y = self.wcoord2.all_world2pix(_ra, _dec, 0)
-        ax2.text(_x, _y, 'x', fontsize=7, ha='center', va='center')
-        _ra, _dec = wcoord.all_pix2world(-1, 2.5, 0)
-        _x, _y = self.wcoord2.all_world2pix(_ra, _dec, 0)
-        ax2.text(_x, _y, 'y', fontsize=7, ha='center', va='center')
-
-        xcoords = ax2.coords[0]
-        ycoords = ax2.coords[1]
-        xcoords.set_major_formatter('d.dd')
-        ycoords.set_major_formatter('d.dd')
-        xcoords.ticklabels.set_fontsize(7)
-        ycoords.ticklabels.set_fontsize(7)
-        xcoords.set_axislabel('RA (deg)',fontsize=7)
-        ycoords.set_axislabel('Dec (deg)',fontsize=7)
-
-        ################## plot small skyview ###########################
-
-        if self.wcoord3 is not None and self.dsssmalldata is not None:
-            ax3 = self.add_axes([0.67, 0.05, 0.4, 0.4], projection=self.wcoord3)
-            self.ax3 = ax3
-            ax3.imshow(self.dsssmalldata, cmap='gray_r')
-            _x1, _x2 = ax3.get_xlim()
-            _y1, _y2 = ax3.get_ylim()
-
-            #### plot circles for different separations
-            ra0  = self.coord.ra.deg
-            dec0 = self.coord.dec.deg
-            x0, y0 = self.wcoord3.all_world2pix(ra0, dec0, 0)
-            for rc in np.arange(10, 60+1, 10):
-                _ra_lst, _dec_lst = get_circle(ra0, dec0, rc/3600)
-                x1_lst, y1_lst = self.wcoord3.all_world2pix(_ra_lst, _dec_lst, 0)
-                ax3.plot(x1_lst, y1_lst, '--', color='C2', lw=0.5)
-                if y1_lst[0]<_y2:
-                    ax3.text(x1_lst[0], y1_lst[0], '{:}"'.format(rc),
-                            ha='center', color='C2', fontsize=6)
+        if plot_skyview:
+            ############## plot large skyview ############
+            ax2 = self.add_axes([0.67, 0.52, 0.4, 0.4], projection=self.wcoord2)
+            ax2.imshow(self.dss360data, cmap='gray_r')
+            self.ax2 = ax2
             
-            #### plot nearby stars and proper motion arrows ######
-            pmlen = 1000
-            m = self.gaia3table['Gmag']<18
+            # plot pixel grid
+            for iy in np.arange(-0.5, ny, 1):
+                x_lst = [-0.5, nx-0.5]
+                y_lst = [iy, iy]
+                ra_lst, dec_lst = wcoord.all_pix2world(x_lst, y_lst, 0)
+                x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+                ax2.plot(x2_lst, y2_lst, '-', c='b', lw=0.3)
+            for ix in np.arange(-0.5, nx, 1):
+                x_lst = [ix, ix]
+                y_lst = [-0.5, ny-0.5]
+                ra_lst, dec_lst = wcoord.all_pix2world(x_lst, y_lst, 0)
+                x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+                ax2.plot(x2_lst, y2_lst, '-', c='b', lw=0.3)
             
-            # bright stars
-            ra_lst = self.gaia3table[m]['RAJ2000']
-            dec_lst = self.gaia3table[m]['DEJ2000']
-            x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
-            ax3.plot(x_lst, y_lst, 'o', ms=5, color='none', mec='C0', mew=0.8)
-            # dark stars
-            ra_lst = self.gaia3table[~m]['RAJ2000']
-            dec_lst = self.gaia3table[~m]['DEJ2000']
-            x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
-            ax3.plot(x_lst, y_lst, 'o', ms=0.5, color='none', mec='C0', mew=0.8)
-            # plot proper motion for ALL stars
-            ra_lst = self.gaia3table['RAJ2000']
-            dec_lst = self.gaia3table['DEJ2000']
-            x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
-            pmra_lst  = self.gaia3table['pmRA']
-            pmdec_lst = self.gaia3table['pmDE']
-            d_ra = pmra_lst*1e-3/3600./np.cos(np.deg2rad(dec_lst))*pmlen
-            d_dec = pmdec_lst*1e-3/3600.*pmlen
-            ra2_lst = ra_lst + d_ra
-            dec2_lst = dec_lst + d_dec
-            x2_lst, y2_lst = self.wcoord3.all_world2pix(ra2_lst, dec2_lst, 0)
-            dx_lst = x2_lst - x_lst
-            dy_lst = y2_lst - y_lst
-            ax3.quiver(x_lst, y_lst, dx_lst, dy_lst, width=2, units='dots',
-                     angles='xy', scale_units='xy', scale=1, color='C0')
-            ax3.set_xlim(_x1, _x2)
-            ax3.set_ylim(_y1, _y2)
-            #ax3.grid(True, ls='--', lw=0.5)
+            # plot aperture
+            bound_lst = get_aperture_bound(lcdata.aperture)
+            for (x1, y1, x2, y2) in bound_lst:
+                ra_lst, dec_lst = wcoord.all_pix2world(
+                        [x1-0.5,x2-0.5], [y1-0.5,y2-0.5], 0)
+                x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+                ax2.plot(x2_lst, y2_lst,  'r-', lw=0.7)
             
-            xcoords = ax3.coords[0]
-            ycoords = ax3.coords[1]
-            xcoords.set_major_formatter('d.ddd')
-            ycoords.set_major_formatter('d.ddd')
+            # plot x and y arrows
+            for x_lst, y_lst in [([-1.0, +1.5], [-1.0, -1.0]),
+                                 ([-1.0, -1.0], [-1.0, +1.5])]:
+                ra_lst, dec_lst = wcoord.all_pix2world(x_lst, y_lst, 0)
+                x2_lst, y2_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+                x, dx = x2_lst[0], x2_lst[1]-x2_lst[0]
+                y, dy = y2_lst[0], y2_lst[1]-y2_lst[0]
+                ax2.arrow(x, y, dx, dy, width=1, color='k', lw=0, head_width=5,
+                        head_length=10)
+            _ra, _dec = wcoord.all_pix2world(2.5, -1, 0)
+            _x, _y = self.wcoord2.all_world2pix(_ra, _dec, 0)
+            ax2.text(_x, _y, 'x', fontsize=7, ha='center', va='center')
+            _ra, _dec = wcoord.all_pix2world(-1, 2.5, 0)
+            _x, _y = self.wcoord2.all_world2pix(_ra, _dec, 0)
+            ax2.text(_x, _y, 'y', fontsize=7, ha='center', va='center')
+            
+            xcoords = ax2.coords[0]
+            ycoords = ax2.coords[1]
+            xcoords.set_major_formatter('d.dd')
+            ycoords.set_major_formatter('d.dd')
             xcoords.ticklabels.set_fontsize(7)
             ycoords.ticklabels.set_fontsize(7)
-            #xcoords.set_axislabel('RA (deg)',fontsize=7)
+            xcoords.set_axislabel('RA (deg)',fontsize=7)
             ycoords.set_axislabel('Dec (deg)',fontsize=7)
-        else:
-            print('Error: check dss small data')
-            print(self.wcoord3)
-            print(self.dsssmalldata)
+            
+            ################## plot small skyview ###########################
+            
+            if self.wcoord3 is not None and self.dsssmalldata is not None:
+                ax3 = self.add_axes([0.67, 0.05, 0.4, 0.4], projection=self.wcoord3)
+                self.ax3 = ax3
+                ax3.imshow(self.dsssmalldata, cmap='gray_r')
+                _x1, _x2 = ax3.get_xlim()
+                _y1, _y2 = ax3.get_ylim()
+            
+                #### plot circles for different separations
+                ra0  = self.coord.ra.deg
+                dec0 = self.coord.dec.deg
+                x0, y0 = self.wcoord3.all_world2pix(ra0, dec0, 0)
+                for rc in np.arange(10, 60+1, 10):
+                    _ra_lst, _dec_lst = get_circle(ra0, dec0, rc/3600)
+                    x1_lst, y1_lst = self.wcoord3.all_world2pix(_ra_lst, _dec_lst, 0)
+                    ax3.plot(x1_lst, y1_lst, '--', color='C2', lw=0.5)
+                    if y1_lst[0]<_y2:
+                        ax3.text(x1_lst[0], y1_lst[0], '{:}"'.format(rc),
+                                ha='center', color='C2', fontsize=6)
+                
+                #### plot nearby stars and proper motion arrows ######
+                pmlen = 1000
+                m = self.gaia3table['Gmag']<18
+                
+                # bright stars
+                ra_lst = self.gaia3table[m]['RAJ2000']
+                dec_lst = self.gaia3table[m]['DEJ2000']
+                x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
+                ax3.plot(x_lst, y_lst, 'o', ms=5, color='none', mec='C0', mew=0.8)
+                # dark stars
+                ra_lst = self.gaia3table[~m]['RAJ2000']
+                dec_lst = self.gaia3table[~m]['DEJ2000']
+                x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
+                ax3.plot(x_lst, y_lst, 'o', ms=0.5, color='none', mec='C0', mew=0.8)
+                # plot proper motion for ALL stars
+                ra_lst = self.gaia3table['RAJ2000']
+                dec_lst = self.gaia3table['DEJ2000']
+                x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
+                pmra_lst  = self.gaia3table['pmRA']
+                pmdec_lst = self.gaia3table['pmDE']
+                d_ra = pmra_lst*1e-3/3600./np.cos(np.deg2rad(dec_lst))*pmlen
+                d_dec = pmdec_lst*1e-3/3600.*pmlen
+                ra2_lst = ra_lst + d_ra
+                dec2_lst = dec_lst + d_dec
+                x2_lst, y2_lst = self.wcoord3.all_world2pix(ra2_lst, dec2_lst, 0)
+                dx_lst = x2_lst - x_lst
+                dy_lst = y2_lst - y_lst
+                ax3.quiver(x_lst, y_lst, dx_lst, dy_lst, width=2, units='dots',
+                         angles='xy', scale_units='xy', scale=1, color='C0')
+                ax3.set_xlim(_x1, _x2)
+                ax3.set_ylim(_y1, _y2)
+                #ax3.grid(True, ls='--', lw=0.5)
+                
+                xcoords = ax3.coords[0]
+                ycoords = ax3.coords[1]
+                xcoords.set_major_formatter('d.ddd')
+                ycoords.set_major_formatter('d.ddd')
+                xcoords.ticklabels.set_fontsize(7)
+                ycoords.ticklabels.set_fontsize(7)
+                #xcoords.set_axislabel('RA (deg)',fontsize=7)
+                ycoords.set_axislabel('Dec (deg)',fontsize=7)
+            else:
+                print('Error: check dss small data')
+                print(self.wcoord3)
+                print(self.dsssmalldata)
 
         #plt.show()
 
@@ -1012,19 +1014,23 @@ class TpComplex(Figure):
         self.axtp.set_xlim(_x1, _x2)
         self.axtp.set_ylim(_y1, _y2)
 
-        _x1, _x2 = self.ax2.get_xlim()
-        _y1, _y2 = self.ax2.get_ylim()
-        x_lst, y_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
-        self.ax2.plot(x_lst, y_lst, *args, **kwargs)
-        self.ax2.set_xlim(_x1, _x2)
-        self.ax2.set_ylim(_y1, _y2)
+        if hasattr(self, 'ax2'):
+            # large skyview is plotted
+            _x1, _x2 = self.ax2.get_xlim()
+            _y1, _y2 = self.ax2.get_ylim()
+            x_lst, y_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            self.ax2.plot(x_lst, y_lst, *args, **kwargs)
+            self.ax2.set_xlim(_x1, _x2)
+            self.ax2.set_ylim(_y1, _y2)
 
-        _x1, _x2 = self.ax3.get_xlim()
-        _y1, _y2 = self.ax3.get_ylim()
-        x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
-        self.ax3.plot(x_lst, y_lst, *args, **kwargs)
-        self.ax3.set_xlim(_x1, _x2)
-        self.ax3.set_ylim(_y1, _y2)
+        if hasattr(self, 'ax3'):
+            # small skyview is plotted
+            _x1, _x2 = self.ax3.get_xlim()
+            _y1, _y2 = self.ax3.get_ylim()
+            x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
+            self.ax3.plot(x_lst, y_lst, *args, **kwargs)
+            self.ax3.set_xlim(_x1, _x2)
+            self.ax3.set_ylim(_y1, _y2)
         
     def add_texts(self, ra_lst, dec_lst, text_lst, xoff=0, yoff=0, *args, **kwargs):
         _x1, _x2 = self.axtp.get_xlim()
@@ -1036,23 +1042,27 @@ class TpComplex(Figure):
         self.axtp.set_xlim(_x1, _x2)
         self.axtp.set_ylim(_y1, _y2)
 
-        _x1, _x2 = self.ax2.get_xlim()
-        _y1, _y2 = self.ax2.get_ylim()
-        x_lst, y_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
-        for x, y, t in zip(x_lst, y_lst, text_lst):
-            if _x1 < x < _x2 and _y1 < y < _y2:
-                self.ax2.text(x+xoff, y+yoff, t, *args, **kwargs)
-        self.ax2.set_xlim(_x1, _x2)
-        self.ax2.set_ylim(_y1, _y2)
+        if hasattr(self, 'ax2'):
+            # large skyview is plotted
+            _x1, _x2 = self.ax2.get_xlim()
+            _y1, _y2 = self.ax2.get_ylim()
+            x_lst, y_lst = self.wcoord2.all_world2pix(ra_lst, dec_lst, 0)
+            for x, y, t in zip(x_lst, y_lst, text_lst):
+                if _x1 < x < _x2 and _y1 < y < _y2:
+                    self.ax2.text(x+xoff, y+yoff, t, *args, **kwargs)
+            self.ax2.set_xlim(_x1, _x2)
+            self.ax2.set_ylim(_y1, _y2)
 
-        _x1, _x2 = self.ax3.get_xlim()
-        _y1, _y2 = self.ax3.get_ylim()
-        x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
-        for x, y, t in zip(x_lst, y_lst, text_lst):
-            if _x1 < x < _x2 and _y1 < y < _y2:
-                self.ax3.text(x+xoff, y+yoff, t, *args, **kwargs)
-        self.ax3.set_xlim(_x1, _x2)
-        self.ax3.set_ylim(_y1, _y2)
+        if hasattr(self, 'ax3'):
+            # small skyview is plotted
+            _x1, _x2 = self.ax3.get_xlim()
+            _y1, _y2 = self.ax3.get_ylim()
+            x_lst, y_lst = self.wcoord3.all_world2pix(ra_lst, dec_lst, 0)
+            for x, y, t in zip(x_lst, y_lst, text_lst):
+                if _x1 < x < _x2 and _y1 < y < _y2:
+                    self.ax3.text(x+xoff, y+yoff, t, *args, **kwargs)
+            self.ax3.set_xlim(_x1, _x2)
+            self.ax3.set_ylim(_y1, _y2)
 
     def get_tictable(self):
 
@@ -1099,22 +1109,6 @@ class TpComplex(Figure):
             gaia2table = tablelist[catid]
             gaia2table.write(gaia2tablename, format='votable', overwrite=True)
         self.gaia2table = gaia2table
-
-    def get_gaiae3table(self):
-
-        ############## get gaiae3 table #############
-        gaiae3tablename = os.path.join(path,
-                        'gaiae3_nearby_{:012d}_150.vot'.format(self.tic))
-        if os.path.exists(gaiae3tablename):
-            gaiae3table = Table.read(gaiae3tablename)
-        else:
-            catid = 'I/350/gaiaedr3'
-            viz = Vizier(catalog=catid, columns=['**', '+_r'])
-            viz.ROW_LIMIT = -1
-            tablelist = viz.query_region(self.coord, radius=150*u.arcsec)
-            gaiae3table = tablelist[catid]
-            gaiae3table.write(gaiae3tablename, format='votable', overwrite=True)
-        self.gaiae3table = gaiae3table
 
     def get_gaia3table(self):
         path = os.path.join(self.cache['gaia3'], '{:02d}'.format(self.tic%100))
@@ -1190,8 +1184,6 @@ class TpComplex(Figure):
         path = os.path.join(self.cache['skyview'], '{:02d}'.format(self.tic%100))
         if not os.path.exists(path):
             os.makedirs(path)
-
-        print('getting skyview')
 
         ############## get large skyview image ###########
         dss360_filename = os.path.join(path,
