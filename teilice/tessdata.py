@@ -58,8 +58,8 @@ def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     #ceny_lst = ceny_lst[m]
 
     shape = data2.shape
-    aperture = data2&2>0
-    bkgmask  = data2&4>0
+    #aperture = data2&2>0
+    #bkgmask  = data2&4>0
 
     #return (t_lst, q_lst, flux_lst, cenx_lst, ceny_lst, tcorr_lst,
     #        shape, aperture, bkgmask)
@@ -73,9 +73,10 @@ def read_lc(filename, fluxkey='PDCSAP_FLUX'):
     tesslc.tcorr_lst     = data1['TIMECORR']
     tesslc.pos_corr1_lst = data1['POS_CORR1']
     tesslc.pos_corr2_lst = data1['POS_CORR2']
-    tesslc.shape = data2.shape
-    tesslc.aperture = aperture
-    tesslc.bkgmask = bkgmask
+    tesslc.shape         = data2.shape
+    tesslc.imagemask     = data2
+    #tesslc.aperture      = aperture
+    #tesslc.bkgmask       = bkgmask
 
     return tesslc
 

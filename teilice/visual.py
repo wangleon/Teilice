@@ -723,16 +723,8 @@ class TpComplex(Figure):
 
         self.plot_text()
 
-
-        ######## read lc file #########
-        #result = read_lc(lc_file, fluxkey=fluxkey)
-        #tlc_lst  = result[0]
-        #f_lst    = result[1]
-        #cenx_lst = result[2]
-        #ceny_lst = result[3]
-        #aperture = result[4]
-        #bkgmask  = result[5]
-                        
+        aperture = lcdata.imagemask & 2 >0
+        bkgmask  = lcdata.imagemask & 4 >0
 
         ########### read tp file #############
         #t_lst, imgq_lst, image_lst, _, wcoord = read_tp(image_file)
@@ -748,9 +740,9 @@ class TpComplex(Figure):
         # subtract background from TP file
         if imagetype=='tesscut':
             newimage_lst = []
-            nbkg = lcdata.bkgmask.sum()
+            nbkg = bkgmask.sum()
             for image in image_lst:
-                bkg = (image*lcdata.bkgmask).sum()/nbkg
+                bkg = (image*bkgmask).sum()/nbkg
                 newimage_lst.append(image - bkg)
             image_lst = np.array(newimage_lst)
 
@@ -775,7 +767,7 @@ class TpComplex(Figure):
         _y1, _y2 = ax.get_ylim()
 
         # plot aperture
-        bound_lst = get_aperture_bound(lcdata.aperture)
+        bound_lst = get_aperture_bound(aperture)
         for (x1, y1, x2, y2) in bound_lst:
             ax.plot([x1-0.5, x2-0.5], [y1-0.5, y2-0.5], 'r-', lw=1)
 
@@ -809,10 +801,10 @@ class TpComplex(Figure):
         ################## plot pixel-by-pixel lc ######################
         #x0, y0 = wcoord.all_world2pix(ra, dec, 0)
         yy, xx = np.mgrid[:ny:, :nx:]
-        y1 = max(min(yy[lcdata.aperture])-2, 0)
-        y2 = min(max(yy[lcdata.aperture])+3, ny)
-        x1 = max(min(xx[lcdata.aperture])-2, 0)
-        x2 = min(max(xx[lcdata.aperture])+3, nx)
+        y1 = max(min(yy[aperture])-2, 0)
+        y2 = min(max(yy[aperture])+3, ny)
+        x1 = max(min(xx[aperture])-2, 0)
+        x2 = min(max(xx[aperture])+3, nx)
         flux_lst = {}
         for image in image_lst[m2]:
             for y in range(y1, y2):
@@ -831,7 +823,7 @@ class TpComplex(Figure):
                 _w = 0.36/(x2-x1)
                 _h = 0.4/(y2-y1)
                 ax = self.add_axes([0.33+(x-x1)*_w, 0.52+(y-y1)*_h, _w, _h])
-                if lcdata.aperture[y,x]:
+                if aperture[y,x]:
                     color = 'C3'
                 else:
                     color = 'C0'
@@ -905,7 +897,7 @@ class TpComplex(Figure):
                 ax2.plot(x2_lst, y2_lst, '-', c='b', lw=0.3)
             
             # plot aperture
-            bound_lst = get_aperture_bound(lcdata.aperture)
+            bound_lst = get_aperture_bound(aperture)
             for (x1, y1, x2, y2) in bound_lst:
                 ra_lst, dec_lst = wcoord.all_pix2world(
                         [x1-0.5,x2-0.5], [y1-0.5,y2-0.5], 0)
