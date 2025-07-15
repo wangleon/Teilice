@@ -8,8 +8,13 @@ from astropy.coordinates import SkyCoord
 from astropy.table import Table
 from astroquery.vizier import Vizier
 from astroquery.mast import Tesscut
+from astropy.units import UnitsWarning
+import warnings
+warnings.filterwarnings('ignore', category=UnitsWarning, append=True)
 
 from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH
+from .tessdata import read_lc, read_tp
+from .utils import get_sectorinfo, download_lc, download_tp
 
 def get_sourceinfo(tic):
     """Get basic information of input TIC target.
@@ -18,7 +23,7 @@ def get_sourceinfo(tic):
         tic (int): TIC number.
 
     """
-    catid = 'IV/38/tic'
+    catid = 'IV/39/tic82'
     tablelist = Vizier(catalog=catid, columns=['**'],
                 column_filters={'TIC': '={}'.format(tic)}
                 ).query_constraints()
@@ -54,7 +59,8 @@ def query_nearbystars(coord, r):
         astropy.table.Table
 
     """
-    catid = 'IV/38/tic'
+    #catid = 'IV/38/tic'
+    catid = 'IV/39/tic82'
     viz = Vizier(catalog=catid, columns=['**', '+_r'])
     viz.ROW_LIMIT=-1
     tablelist = viz.query_region(coord, radius=r*u.arcsec,
@@ -75,16 +81,22 @@ class TessTarget(object):
 
         # get star info
         self.tic = tic
-        info = get_sourceinfo(tic)
-        self.ra   = info['ra']
-        self.dec  = info['dec']
-        self.tmag = info['Tmag']
-        self.coord = SkyCoord(self.ra, self.dec, unit='deg')
-        self.ticrow = info['ticrow']
-        self.gaiarow = info['gaiarow']
 
         # get nearby stars
         #self.get_nearbystars()
+
+    def __getattr__(self, item):
+        if item in ['ra', 'dec', 'tmag', 'coord', 'ticrow', 'gaiarow']:
+            info = get_sourceinfo(self.tic)
+            self.ra   = info['ra']
+            self.dec  = info['dec']
+            self.tmag = info['Tmag']
+            self.coord = SkyCoord(self.ra, self.dec, unit='deg')
+            self.ticrow = info['ticrow']
+            self.gaiarow = info['gaiarow']
+            return getattr(self, item)
+
+
 
     def get_nearbystars(self, r=250, cache_path=NEARBY_PATH):
         """Query nearby stars within given radius.
@@ -120,11 +132,72 @@ class TessTarget(object):
 
         self.tictable = tictable
 
+    def get_lc_sectors(self):
+        """
+        """
+        filename = os.path.join(CACHE_PATH, 'tess_target_lc.dat')
+        found = False
+        file1 = open(filename)
+        for row in file1:
+            col = row.split(':')
+            if int(col[0])==self.tic:
+                sector_lst = [int(s) for s in col[1].split(',')]
+                found = True
+                break
+        file1.close()
+        if found:
+            return sector_lst
+        else:
+            return []
+
+
     def get_sectors(self):
         """Get the observed sectors of target.
         """
         sector_table = Tesscut.get_sectors(coordinates=self.coord)
         return list(sector_table['sector'])
+
+
+    def get_lc_filename(self, sector, datapool=None):
+        timestamp, orbit = get_sectorinfo(sector)
+        lcfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_lc.fits'.format(
+                    timestamp, sector, self.tic, orbit)
+        path = os.path.join(datapool, 'lc', 's{:03d}'.format(sector))
+
+        lcfilename = os.path.join(path, lcfile)
+        return lcfilename
+
+    def get_tp_filename(self, sector, datapool=None):
+        
+        timestamp, orbit = get_sectorinfo(sector)
+        tpfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_tp.fits'.format(
+                    timestamp, sector, self.tic, orbit)
+        path = os.path.join(datapool, 'tp', 's{:03d}'.format(sector))
+
+        tpfilename = os.path.join(path, tpfile)
+        return tpfilename
+
+
+    def get_lc(self, sector, auto_download=True, datapool=None):
+        # get LC filename
+        lcfilename = self.get_lc_filename(sector, datapool=datapool)
+
+        if not os.path.exists(lcfilename) and auto_download:
+            download_lc(self.tic, sector, datapool)
+
+        lcdata = read_lc(lcfilename)
+        return lcdata
+            
+    def get_tp(self, sector, auto_download=True, datapool=None):
+
+        # get TP filename
+        tpfilename = self.get_tp_filename(sector, datapool=datapool)
+
+        if not os.path.exists(tpfilename) and auto_download:
+            download_tp(self.tic, sector, datapool)
+
+        tpdata = read_tp(tpfilename)
+        return tpdata
 
     def get_tesscutfile(self, sector, xsize, ysize, tesscut_path):
         pattern = 'tess\-s(\d{4})\-(\d)\-(\d)_(\d+\.\d+)_(\-?\d+\.\d+)_(\d+)x(\d+)_astrocut\.fits'
