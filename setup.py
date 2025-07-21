@@ -3,7 +3,8 @@ from distutils.core import setup
 
 setup(
     name         = 'teilice',
-    description  = '',
+    version      = '0.1',
+    description  = 'TESS Full Frame Image Photometry Package',
     author       = 'Liang Wang',
     author_email = 'wang.leon@gmail.com',
     license      = 'Apache-2.0',
