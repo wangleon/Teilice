@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore', category=UnitsWarning, append=True)
 
 from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH
 from .tessdata import read_lc, read_tp
-from .utils import get_sectorinfo, download_lc, download_tp
+from .utils import get_sectorinfo, download_lc, download_tp, get_lc_sectors
 
 def get_sourceinfo(tic):
     """Get basic information of input TIC target.
@@ -135,20 +135,21 @@ class TessTarget(object):
     def get_lc_sectors(self):
         """
         """
-        filename = os.path.join(CACHE_PATH, 'tess_target_lc.dat')
-        found = False
-        file1 = open(filename)
-        for row in file1:
-            col = row.split(':')
-            if int(col[0])==self.tic:
-                sector_lst = [int(s) for s in col[1].split(',')]
-                found = True
-                break
-        file1.close()
-        if found:
-            return sector_lst
-        else:
-            return []
+        #filename = os.path.join(CACHE_PATH, 'tess_target_lc.dat')
+        #found = False
+        #file1 = open(filename)
+        #for row in file1:
+        #    col = row.split(':')
+        #    if int(col[0])==self.tic:
+        #        sector_lst = [int(s) for s in col[1].split(',')]
+        #        found = True
+        #        break
+        #file1.close()
+        #if found:
+        #    return sector_lst
+        #else:
+        #    return []
+        return get_lc_sectors(self.tic)
 
 
     def get_sectors(self):

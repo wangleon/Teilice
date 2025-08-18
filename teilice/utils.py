@@ -217,3 +217,39 @@ def make_target_lst():
     outfile.close()
 
     print('LC target list updated. N={}'.format(len(tic_lst)))
+
+
+def get_lc_sectors(arg):
+    """
+    """
+    
+    filename = os.path.join(cm.CACHE_PATH, 'tess_target_lc.dat')
+
+    if isinstance(arg, int):
+        tic = arg
+        found = False
+        file1 = open(filename)
+        for row in file1:
+            col = row.split(':')
+            if int(col[0]) == tic:
+                sector_lst = [int(s) for s in col[1].split(',')]
+                found = True
+                break
+        file1.close()
+        if found:
+            return sector_lst
+        else:
+            return []
+    elif isinstance(arg, list):
+        max_tic = max(arg)
+        result_lst = {tic:[] for tic in arg}
+        file1 = open(filename)
+        for row in file1:
+            col = row.split(':')
+            _tic = int(col[0])
+            if _tic in result_lst:
+                result_lst[_tic] = [int(s) for s in col[1].split(',')]
+            if _tic > max_tic:
+                break
+        file1.close()
+        return result_lst
