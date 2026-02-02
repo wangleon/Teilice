@@ -1189,7 +1189,7 @@ class TpComplex(Figure):
             # get large DSS image
             radius = 360  # in unit of arcsec
             #print('Trying to download SkyView of', self.tic)
-            for i in range(50):
+            for i in range(10):
                 #print('Trying number', i)
                 try:
                     paths = SkyView.get_images(position=self.coord,

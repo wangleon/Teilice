@@ -12,9 +12,10 @@ from astropy.units import UnitsWarning
 import warnings
 warnings.filterwarnings('ignore', category=UnitsWarning, append=True)
 
-from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH
+from .common import CACHE_PATH, TESSCUT_PATH, NEARBY_PATH, LC_TARGETS_FILE
 from .tessdata import read_lc, read_tp
-from .utils import get_sectorinfo, download_lc, download_tp, get_lc_sectors
+from .utils import (get_sectorinfo, download_lc, download_tp, get_lc_sectors,
+                    get_lc_filename, get_tp_filename)
 
 def get_sourceinfo(tic):
     """Get basic information of input TIC target.
@@ -48,6 +49,19 @@ def get_sourceinfo(tic):
             'Tmag': ticrow['Tmag'],
             }
 
+def get_lc_targets():
+    tic_lst = {}
+    file1 = open(LC_TARGETS_FILE)
+    for row in file1:
+        col = row.split(':')
+        tic = int(col[0])
+        sector_lst = [int(v) for v in col[1].split(',')]
+        tic_lst[tic] = sector_lst
+    file1.close()
+    return tic_lst
+
+
+
 def query_nearbystars(coord, r):
     """Query the nearby TIC objects around a given coordinate.
 
@@ -80,7 +94,7 @@ class TessTarget(object):
         #    os.mkdir(CACHE_PATH)
 
         # get star info
-        self.tic = tic
+        self.tic = int(tic)
 
         # get nearby stars
         #self.get_nearbystars()
@@ -160,24 +174,10 @@ class TessTarget(object):
 
 
     def get_lc_filename(self, sector, datapool=None):
-        timestamp, orbit = get_sectorinfo(sector)
-        lcfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_lc.fits'.format(
-                    timestamp, sector, self.tic, orbit)
-        path = os.path.join(datapool, 'lc', 's{:03d}'.format(sector))
-
-        lcfilename = os.path.join(path, lcfile)
-        return lcfilename
+        return get_lc_filename(self.tic, sector, datapool)
 
     def get_tp_filename(self, sector, datapool=None):
-        
-        timestamp, orbit = get_sectorinfo(sector)
-        tpfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_tp.fits'.format(
-                    timestamp, sector, self.tic, orbit)
-        path = os.path.join(datapool, 'tp', 's{:03d}'.format(sector))
-
-        tpfilename = os.path.join(path, tpfile)
-        return tpfilename
-
+        return get_tp_filename(self.tic, sector, datapool)
 
     def get_lc(self, sector, auto_download=True, datapool=None):
         # get LC filename
