@@ -56,7 +56,8 @@ def sector_lst_to_string(sector_lst):
     return ','.join(string_lst)
 
 
-def find_saved_sa_files(main_tic, tic):
+def find_saved_sa_files(main_tic, tic, datapool):
+
     path = os.path.join(datapool, 'sa-lc')
     
     sector_lst = []
@@ -80,8 +81,9 @@ def find_saved_sa_files(main_tic, tic):
 
 class MainWindow(tk.Frame):
 
-    def __init__(self, master, width, height, source_filename):
+    def __init__(self, master, width, height, source_filename, datapool):
         self.master = master
+        self.datapool = datapool
 
         tk.Frame.__init__(self, master, width=width, height=height)
 
@@ -116,7 +118,7 @@ class MainWindow(tk.Frame):
         
         t1 = time.time()
         # read tic tables
-        cache_tic = os.path.join(datapool, 'cache_ticv82',
+        cache_tic = os.path.join(self.datapool, 'cache_ticv82',
                 '{:02d}'.format(tic%100))
         ticfilename = os.path.join(cache_tic,
                 'tic_nearby_{:012d}_250.vot'.format(tic))
@@ -158,7 +160,7 @@ class MainWindow(tk.Frame):
         #    pass
         
         # read gaia3 tables
-        cache_gaia3 = os.path.join(datapool, 'cache_gaia3',
+        cache_gaia3 = os.path.join(self.datapool, 'cache_gaia3',
                 '{:02d}'.format(tic%100))
         #gaia3filename = os.path.join(cache_gaia3,
         #        'gaia3_nearby_{:012d}_150.vot'.format(tic))
@@ -217,8 +219,8 @@ class MainWindow(tk.Frame):
 
 
         ### redraw
-        lcdata = target.get_lc(sector, datapool=datapool)
-        tpdata = target.get_tp(sector, datapool=datapool)
+        lcdata = target.get_lc(sector, datapool=self.datapool)
+        tpdata = target.get_tp(sector, datapool=self.datapool)
         self.lcdata = lcdata
 
         ########### read tp file #############
@@ -431,54 +433,7 @@ class MainWindow(tk.Frame):
         for tick in axlc1c.yaxis.get_major_ticks():
             tick.label2.set_fontsize(6)
 
-
-        # plot existing data of selected tic
-        #if selected_tic is not None and selected_tic != tic:
-        if False:
-            fname = 'tess-{:012d}-{:012d}-s{:03d}-s_lc.fits'.format(
-                        selected_tic, tic, sector)
-            path = os.path.join(datapool, 'sa-lc', 's{:03d}'.format(sector))
-
-            filename = os.path.join(path, fname)
-            if os.path.exists(filename):
-                hdulst = fits.open(filename)
-                lc_table = hdulst[1].data
-                mask     = hdulst[2].data
-                hdulst.close()
-
-                # set aperture plot in the left TP axes
-                self.custom_apertures = mask & 2 > 0
-                self.custom_img.set(data=self.custom_apertures)
-                
-                # set aperture plot in the center PBP axes
-                for (y, x), ax in self.pbp_axes.items():
-                    if self.custom_apertures[y, x]:
-                        ax.patch.set_facecolor('#ffbbdd')
-                    else:
-                        ax.patch.set_facecolor('w')
-
-                # set LC
-                flux_lst = lc_table['SAP_FLUX']
-                ydata = flux_lst[self.m1]
-                self.custom_line.set_ydata(ydata)
-
-                # reset xlim and ylim
-                vmin = np.nanmin(ydata)
-                vmax = np.nanmax(ydata)
-                vspan = vmax-vmin
-                self.axlc2.set_ylim(vmin-vspan*0.1, vmax+vspan*0.1)
-
-                # reset text of axlc2
-                self.axlc2text.set_text('TIC {}'.format(selected_tic))
-                # reset position of axlc2
-                _x1, _x2 = self.axlc2.get_xlim()
-                _y1, _y2 = self.axlc2.get_ylim()
-                self.axlc2text.set_x(0.95*_x1+0.05*_x2)
-                self.axlc2text.set_y(0.1*_y1+0.9*_y2)
-
-
         self.plot_frame.focus_set()
-
 
     def reset_custom_lc(self):
         # reset to zero
@@ -499,7 +454,7 @@ class MainWindow(tk.Frame):
 
         fname = 'tess-{:012d}-{:012d}-s{:03d}-s_lc.fits'.format(
                     selected_tic, tic, sector)
-        path = os.path.join(datapool, 'sa-lc', 's{:03d}'.format(sector))
+        path = os.path.join(self.datapool, 'sa-lc', 's{:03d}'.format(sector))
 
         filename = os.path.join(path, fname)
         if os.path.exists(filename):
@@ -1149,15 +1104,20 @@ class RightFrame(tk.Frame):
 
         icondata = {
             '2x2': '''R0lGODlhDQANAIABAAAAAP///
-                yH5BAEKAAEALAAAAAANAA0AAAIbjI+pC+2OwJGG1olzsHa/F2kdp21i9EHLyh4FADs=''',
+                yH5BAEKAAEALAAAAAANAA0AAAIbjI+pC+2OwJGG1olzsHa/
+                F2kdp21i9EHLyh4FADs=''',
             '+': '''R0lGODlhDQANAIABAAAAAP///
-                yH5BAEKAAEALAAAAAANAA0AAAIdjAOZx3jQnozOwKeyvrUvOyHciG0bQ1JptDYaUwAAOw==''',
+                yH5BAEKAAEALAAAAAANAA0AAAIdjAOZx3jQnozOwKeyvrUv
+                OyHciG0bQ1JptDYaUwAAOw==''',
             '3x3': '''R0lGODlhDQANAIABAAAAAP///
-                yH5BAEKAAEALAAAAAANAA0AAAIdhI8YCxvN4HPS0BuTtgy/6nFTl21JSIHkh5amUQAAOw==''',
+                yH5BAEKAAEALAAAAAANAA0AAAIdhI8YCxvN4HPS0BuTtgy/
+                6nFTl21JSIHkh5amUQAAOw==''',
             '4x4-4': '''R0lGODlhDQANAIABAAAAAP///
-                yH5BAEKAAEALAAAAAANAA0AAAIdjIEJxrF+WoTUqavm21sfDHYU543hxYhPo0oWahQAOw==''',
+                yH5BAEKAAEALAAAAAANAA0AAAIdjIEJxrF+WoTUqavm21sf
+                DHYU543hxYhPo0oWahQAOw==''',
             '4x4': '''R0lGODlhDQANAIABAAAAAP///
-                yH5BAEKAAEALAAAAAANAA0AAAIahI8YAdvsnnQxWUOhxjvf73lTx3xWuI2qiRQAOw==''',
+                yH5BAEKAAEALAAAAAANAA0AAAIahI8YAdvsnnQxWUOhxjvf
+                73lTx3xWuI2qiRQAOw==''',
             '5x5-4': '''R0lGODlhEAAQAIABAAAAAP///
                 yH5BAEKAAEALAAAAAAQABAAAAIkjIGpxgEHXYtPWqeyrpyeboHb
                 mHjhZ4rkmFJiumrMe83ttDIFADs=''',
@@ -1300,7 +1260,10 @@ class RightFrame(tk.Frame):
         self.source_frame.save_button['state'] = tk.NORMAL
 
     def save_new_lc(self):
-     
+
+        # get path to the datapool
+        datapool = self.master.datapool
+
         ## get selected TIC number
         selected_tic = self.master.plot_frame.nearby_frame.get_selected_tic()
 
@@ -1380,7 +1343,7 @@ class RightFrame(tk.Frame):
                     values = list(source_tree.item(item2, 'value'))
                     if len(values[1])>0 and int(values[1])==selected_tic:
                         # get sectors
-                        sectors = find_saved_sa_files(self.master.tic, selected_tic)
+                        sectors = find_saved_sa_files(self.master.tic, selected_tic, datapool)
                         sector_string = sector_lst_to_string(sectors)
                         # update the sector list in source table
                         values[2] = sector_string
@@ -1418,27 +1381,29 @@ class RightFrame(tk.Frame):
             iy = int(np.round(y))
 
             if shape=='+':
-                pixel_lst = [
-                                       (ix, iy-1),
-                            (ix-1,iy), (ix, iy),   (ix+1,iy),
-                                       (ix, iy+1),
-                                     ]
+                shift_lst = [
+                             (0, -1),
+                    (-1, 0), (0,  0), (+1, 0),
+                             (0, +1),
+                            ]
             elif shape=='3x3':
-                pixel_lst = [
-                    (ix-1, iy-1), (ix, iy-1), (ix+1, iy-1),
-                    (ix-1, iy),   (ix, iy),   (ix+1, iy),
-                    (ix-1, iy+1), (ix, iy+1), (ix+1, iy+1),
+                shift_lst = [
+                    (-1,-1), (0,-1), (+1,-1),
+                    (-1, 0), (0, 0), (+1, 0),
+                    (-1,+1), (0,+1), (+1,+1),
                     ]
             elif shape=='5x5-4':
-                pixel_lst = [
-                                  (ix-1, iy-2), (ix, iy-2), (ix+1, iy-2),
-                    (ix-2, iy-1), (ix-1, iy-1), (ix, iy-1), (ix+1, iy-1), (ix+2, iy-1),
-                    (ix-2, iy),   (ix-1, iy),   (ix, iy),   (ix+1, iy),   (ix+2, iy),
-                    (ix-2, iy+1), (ix-1, iy+1), (ix, iy+1), (ix+1, iy+1), (ix+2, iy+1),
-                                  (ix-1, iy+2), (ix, iy+2), (ix+1, iy+2),
+                shift_lst = [
+                             (-1,-2), (0,-2), (+1,-2),
+                    (-2,-1), (-1,-1), (0,-1), (+1,-1), (+2,-1),
+                    (-2, 0), (-1, 0), (0, 0), (+1, 0), (+2, 0),
+                    (-2,+1), (-1,+1), (0,+1), (+1,+1), (+2,+1),
+                             (-1,+2), (0,+2), (+1,+2),
                     ]
             else:
-                pixel_lst = []
+                shift_lst = []
+
+            pixel_lst = [(ix+_sx, iy+_sy) for _sx, _sy in shift_lst]
 
             for _ix, _iy in pixel_lst:
                 if 0<=_ix<nx and 0<=_iy<ny:
@@ -1458,36 +1423,38 @@ class RightFrame(tk.Frame):
                 iy = iy + 0.5
 
             if shape=='2x2':
-                pixel_lst = [
-                    (ix-0.5, iy-0.5), (ix+0.5, iy-0.5),
-                    (ix-0.5, iy+0.5), (ix+0.5, iy+0.5),
+                shift_lst = [
+                    (-0.5,-0.5), (+0.5,-0.5),
+                    (-0.5,+0.5), (+0.5,+0.5),
                     ]
             elif shape=='4x4-4':
-                pixel_lst = [
-                                   (ix-0.5,iy-1.5),(ix+0.5,iy-1.5),
-                   (ix-1.5,iy-0.5),(ix-0.5,iy-0.5),(ix+0.5,iy-0.5),(ix+1.5,iy-0.5),
-                   (ix-1.5,iy+0.5),(ix-0.5,iy+0.5),(ix+0.5,iy+0.5),(ix+1.5,iy+0.5),
-                                   (ix-0.5,iy+1.5),(ix+0.5,iy+1.5),
+                shift_lst = [
+                               (-0.5,-1.5),(+0.5,-1.5),
+                   (-1.5,-0.5),(-0.5,-0.5),(+0.5,-0.5),(+1.5,-0.5),
+                   (-1.5,+0.5),(-0.5,+0.5),(+0.5,+0.5),(+1.5,+0.5),
+                               (-0.5,+1.5),(+0.5,+1.5),
                    ]
 
             elif shape=='4x4':
-                pixel_lst = [
-                   (ix-1.5,iy-1.5),(ix-0.5,iy-1.5),(ix+0.5,iy-1.5),(ix+1.5,iy-1.5),
-                   (ix-1.5,iy-0.5),(ix-0.5,iy-0.5),(ix+0.5,iy-0.5),(ix+1.5,iy-0.5),
-                   (ix-1.5,iy+0.5),(ix-0.5,iy+0.5),(ix+0.5,iy+0.5),(ix+1.5,iy+0.5),
-                   (ix-1.5,iy+1.5),(ix-0.5,iy+1.5),(ix+0.5,iy+1.5),(ix+1.5,iy+1.5),
+                shift_lst = [
+                   (-1.5,-1.5),(-0.5,-1.5),(+0.5,-1.5),(+1.5,-1.5),
+                   (-1.5,-0.5),(-0.5,-0.5),(+0.5,-0.5),(+1.5,-0.5),
+                   (-1.5,+0.5),(-0.5,+0.5),(+0.5,+0.5),(+1.5,+0.5),
+                   (-1.5,+1.5),(-0.5,+1.5),(+0.5,+1.5),(+1.5,+1.5),
                    ]
             elif shape=='6x6-12':
-                pixel_lst = [
-                                                   (ix-0.5,iy-2.5),(ix+0.5,iy-2.5),
-                                   (ix-1.5,iy-1.5),(ix-0.5,iy-1.5),(ix+0.5,iy-1.5),(ix+1.5,iy-1.5),
-                   (ix-2.5,iy-0.5),(ix-1.5,iy-0.5),(ix-0.5,iy-0.5),(ix+0.5,iy-0.5),(ix+1.5,iy-0.5),(ix+2.5,iy-0.5),
-                   (ix-2.5,iy+0.5),(ix-1.5,iy+0.5),(ix-0.5,iy+0.5),(ix+0.5,iy+0.5),(ix+1.5,iy+0.5),(ix+2.5,iy+0.5),
-                                   (ix-1.5,iy+1.5),(ix-0.5,iy+1.5),(ix+0.5,iy+1.5),(ix+1.5,iy+1.5),
-                                                   (ix-0.5,iy+2.5),(ix+0.5,iy+2.5),
+                shift_lst = [
+                                           (-0.5,-2.5),(+0.5,-2.5),
+                               (-1.5,-1.5),(-0.5,-1.5),(+0.5,-1.5),(+1.5,-1.5),
+                   (-2.5,-0.5),(-1.5,-0.5),(-0.5,-0.5),(+0.5,-0.5),(+1.5,-0.5),(+2.5,-0.5),
+                   (-2.5,+0.5),(-1.5,+0.5),(-0.5,+0.5),(+0.5,+0.5),(+1.5,+0.5),(+2.5,+0.5),
+                               (-1.5,+1.5),(-0.5,+1.5),(+0.5,+1.5),(+1.5,+1.5),
+                                           (-0.5,+2.5),(+0.5,+2.5),
                    ]
             else:
-                pixel_lst = []
+                shift_lst = []
+            
+            pixel_lst = [(ix+_sx, iy+_sy) for _sx, _sy in shift_lst]
 
             for _ix, _iy in pixel_lst:
                 _ix = int(_ix)
@@ -1521,6 +1488,9 @@ class RightFrame(tk.Frame):
 class SourceTable(tk.Frame):
     def __init__(self, master, width, height, source_filename):
         self.master = master
+
+        datapool = self.master.master.datapool
+
         self.source_filename = source_filename
 
         self.source_table = Table.read(source_filename,
@@ -1605,7 +1575,7 @@ class SourceTable(tk.Frame):
                 self.main_tic_iid_lst[tic] = iid
             else:
                 # this is not a main tic
-                sectors = find_saved_sa_files(tic, real_tic)
+                sectors = find_saved_sa_files(tic, real_tic, datapool)
                 sector_string = sector_lst_to_string(sectors)
                 item = (tic, real_tic, sector_string, comments, u'\xd7')
                 main_iid = self.main_tic_iid_lst[tic]
@@ -1618,11 +1588,11 @@ class SourceTable(tk.Frame):
             
 
         # add a save button
-        self.save_button = tk.Button(master = self,
-                                     text = 'Save List',
-                                     width = 150,
+        self.save_button = tk.Button(master  = self,
+                                     text    = 'Save List',
+                                     width   = 150,
                                      command = self.save_source_table,
-                                     state  = tk.DISABLED,
+                                     state   = tk.DISABLED,
                                      )
 
         self.save_button.pack(side=tk.TOP)
@@ -1691,6 +1661,9 @@ class SourceTable(tk.Frame):
         column = source_tree.identify_column(event.x)
 
         if column == '#5':
+            # get datapool
+            datapool = self.master.master.datapool
+
             # get parent of this item
             main_iid = self.source_tree.parent(iid)
 
@@ -1792,10 +1765,7 @@ class SourceTable(tk.Frame):
         self.save_button['state'] = tk.DISABLED
 
 
-def launch(source_filename, datapool_path):
-
-    global datapool
-    datapool = datapool_path
+def launch(source_filename, datapool):
 
     master = tk.Tk()
     master.resizable(width=False, height=False)
@@ -1828,6 +1798,7 @@ def launch(source_filename, datapool_path):
                             width  = window_width,
                             height = window_height,
                             source_filename = source_filename,
+                            datapool = datapool,
                             )
 
     master.mainloop()
