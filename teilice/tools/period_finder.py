@@ -6,6 +6,8 @@ import time
 import argparse
 
 import numpy as np
+import scipy.interpolate as intp
+import scipy.optimize as opt
 from astropy.table import Table, MaskedColumn
 from astropy.coordinates import SkyCoord
 import astropy.units as u
@@ -141,6 +143,11 @@ class MainWindow(tk.Frame):
         # tlength_lst is a dict containing the unblocked time length of each
         # sector. And it should be updated after self.lc_mask changed
         self.tlength_lst = {}
+        # lc trend
+        self.lc_trends = None
+        self.detrendwin = 20
+        # modeled light curve
+        self.model_curve = None
 
         # segment info
         self.segment_lst = []
@@ -364,7 +371,6 @@ class MainWindow(tk.Frame):
         self.plot()
         self.plot_frame.canvas.draw()
 
-
     def change_priwin(self, ratio):
         self.priwin = self.priwin * ratio
         self.plot()
@@ -391,6 +397,205 @@ class MainWindow(tk.Frame):
         self.plot()
         self.plot_frame.canvas.draw()
 
+
+    def change_detrendwin(self, v):
+        self.detrendwin = v
+        self.fit_ooe()
+
+    def fit_ooe(self):
+
+        self.lc_trends = {}
+
+        if ~np.isnan(self.period) and ~np.isnan(self.t0) \
+            and ~np.isnan(self.priwin) and ~np.isnan(self.secwin):
+            for s, (t_lst, f_lst) in self.lc_lst.items():
+                mask = f_lst < np.percentile(f_lst, 99)
+                t1 = t_lst[0]
+                t2 = t_lst[-1]
+                i1 = int((t1-self.t0)/self.period)
+                i2 = int((t2-self.t0)/self.period)
+                for i in np.arange(i1, i2+1):
+                    _tc = self.t0 + i * self.period
+                    _t1 = _tc - self.priwin * self.period
+                    _t2 = _tc + self.priwin * self.period
+                    _m = (t_lst > _t1)*(t_lst < _t2)
+                    mask[_m] = False
+                for i in np.arange(i1-1, i2+1):
+                    _tc = self.t0 + (i + self.secphase) * self.period
+                    _t1 = _tc - self.secwin * self.period
+                    _t2 = _tc + self.secwin * self.period
+                    _m = (t_lst > _t1)*(t_lst < _t2)
+                    mask[_m] = False
+
+                smx, smy = smooth_trend(t_lst[mask], f_lst[mask], self.period/self.detrendwin)
+                newf = intp.InterpolatedUnivariateSpline(smx, smy, k=3)
+                self.lc_trends[s] = newf(t_lst)
+
+        self.plot()
+        self.plot_frame.canvas.draw()
+
+    def defit_ooe(self):
+        self.lc_trends = None
+        self.plot()
+        self.plot_frame.canvas.draw()
+
+    def fit_period(self):
+
+        data_lst = {}
+        for s in self.sector_lst:
+
+            t_lst, f_lst = self.lc_lst[s]
+            m = f_lst < np.percentile(f_lst, 99)
+
+            t_lst, f_lst = self.lc_lst[s]
+
+            # find offset of this sector
+            if self.correct_offset:
+                offset = self.offset_lst[s]
+            else:
+                offset = 0.0
+
+            if self.lc_trends is not None:
+                trendf = self.lc_trends[s]
+                newf_lst = f_lst / trendf * self.medflux_lst[s]
+                newf_lst = newf_lst - offset
+            else:
+                newf_lst = f_lst - offset
+
+            data_lst[s] = (m, newf_lst)
+
+        def get_disp(ratio):
+            period = self.period * (1+ratio)
+            nsep = 20
+            dphase = 4 * self.priwin / nsep
+            disp_lst = []
+            for i in np.arange(nsep):
+                ph1 = -2*self.priwin + i * dphase
+                ph2 = ph1 + dphase
+                
+                allflux_lst = []
+                
+                for s, (m, newf_lst) in data_lst.items():
+                    t_lst, f_lst = self.lc_lst[s]
+
+                    if not self.sector_mask[s]:
+                        continue
+                
+                    phase_lst = ((t_lst - self.t0)%period)/period
+                
+                    m1 = (phase_lst > ph1)   & (phase_lst < ph2)
+                    m2 = (phase_lst > ph1+1) & (phase_lst < ph2+1)
+                    m0 = m * (m1 + m2)
+                    if m0.sum() > 3:
+                        for v in newf_lst[m0]:
+                            allflux_lst.append(v)
+                
+                allflux_lst = np.array(allflux_lst)
+                if allflux_lst.size > 0:
+                    std = allflux_lst.std()
+                    disp_lst.append(std)
+            disp_lst = np.array(disp_lst)
+            disp = (disp_lst**2).sum()/disp_lst.size
+            print('try', ratio, disp)
+            return disp
+
+
+        result = opt.minimize_scalar(get_disp,
+                    bracket=(-0.01, 0, 0.01), tol=1e-7, method='Brent')
+        if result.success:
+            newratio = result.x
+            new_period = self.period * (1 + newratio)
+            # will trigger plot() function here
+            self.set_period(new_period)
+
+
+    def fit_eclipse(self):
+        data_lst = {}
+        for s in self.sector_lst:
+
+            t_lst, f_lst = self.lc_lst[s]
+            m = f_lst < np.percentile(f_lst, 99)
+
+            t_lst, f_lst = self.lc_lst[s]
+
+            # find offset of this sector
+            if self.correct_offset:
+                offset = self.offset_lst[s]
+            else:
+                offset = 0.0
+
+            if self.lc_trends is not None:
+                trendf = self.lc_trends[s]
+                newf_lst = f_lst / trendf * self.medflux_lst[s]
+                newf_lst = newf_lst - offset
+            else:
+                newf_lst = f_lst - offset
+
+            data_lst[s] = (m, newf_lst)
+
+
+        allphase_lst = []
+        allflux_lst = []
+
+        ph1 = -2*self.priwin
+        ph2 = 2*self.priwin
+
+        for s, (m, newf_lst) in data_lst.items():
+            t_lst, f_lst = self.lc_lst[s]
+
+            if not self.sector_mask[s]:
+                continue
+                
+            phase_lst = ((t_lst - self.t0)%self.period)/self.period
+
+            m1 = m*(phase_lst < ph2)
+            for _ph, _f, in zip(phase_lst[m1], newf_lst[m1]):
+                allphase_lst.append(_ph+1)
+                allflux_lst.append(_f)
+
+            m2 = m*(phase_lst > ph1+1)
+            for _ph, _f, in zip(phase_lst[m2], newf_lst[m2]):
+                allphase_lst.append(_ph)
+                allflux_lst.append(_f)
+
+        allphase_lst = np.array(allphase_lst)
+        allflux_lst = np.array(allflux_lst)
+
+        # resort
+        idx = allphase_lst.argsort()
+        allphase_lst = allphase_lst[idx]
+        allflux_lst  = allflux_lst[idx]
+
+        # outof elipse points
+        m1 = np.abs(allphase_lst-1) > self.priwin
+        f0 = allflux_lst[m1].mean()
+
+        r1 = self.priwin * 4
+        r2 = self.secwin * 4
+        inc = np.deg2rad(90)
+        u = 0.2
+
+        newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 100)
+        newf_lst = get_ecl_kopal(newph_lst, f0, r1, r2, inc, u)
+
+        result = opt.least_squares(ecl_errfunc,
+                        x0=[f0, r1, r2, inc, u],
+                        bounds=(
+                            [0, 0, 0, np.deg2rad(70), 0],
+                            [2*f0, 0.5, 0.5, np.deg2rad(90), 1]),
+                        args=(allphase_lst, allflux_lst))
+        p = result.x
+        print('R1={:10.6f}'.format(p[1]))
+        print('R2={:10.6f}'.format(p[2]))
+        print('inc={:6.3f}'.format(np.rad2deg(p[3])))
+        print('u={:6.3f}'.format(p[4]))
+
+        newf_lst = get_ecl_kopal(newph_lst, p[0], p[1], p[2], p[3], p[4])
+
+        self.model_curve = (newph_lst, newf_lst)
+
+        self.plot()
+        self.plot_frame.canvas.draw()
 
     def plot(self):
 
@@ -426,9 +631,9 @@ class MainWindow(tk.Frame):
         _bottom = 0.08
         _height = 0.39
 
-        axphase = fig.add_axes([ledge, _bottom, 0.23, _height])
-        axpri = fig.add_axes([0.305, _bottom, 0.185, _height])
-        axsec = fig.add_axes([0.51, _bottom, 0.185, _height])
+        axphase = fig.add_axes([ledge, _bottom, 0.238, _height])
+        axpri = fig.add_axes([0.305, _bottom, 0.187, _height])
+        axsec = fig.add_axes([0.508, _bottom, 0.187, _height])
         axgls = fig.add_axes([0.73, _bottom, redge-0.73, _height])
 
         # register to class
@@ -437,7 +642,7 @@ class MainWindow(tk.Frame):
         self.axsec = axsec
         self.axgls = axgls
 
-        # calute width of each axlc
+        # calculate width of each axlc
         nseg = len(plot_segment_lst)
         width_gap = (nseg-1)*gap
         width_lst = np.array([(redge - ledge - width_gap)/eff_tspan*tspan
@@ -458,17 +663,26 @@ class MainWindow(tk.Frame):
                 color = 'C{}'.format(jseg)
 
                 t_lst, f_lst = self.lc_lst[s]
+
+                # find the offset of this sector
                 if self.correct_offset:
                     offset = self.offset_lst[s]
-                    ax.plot(t_lst, f_lst - offset, 'o', c=color,
-                            mew=0, ms=1, alpha=0.8)
-                    ymax = np.percentile(f_lst - offset, self.display_urej)
-                    ymin = f_lst.min() - offset
                 else:
-                    ax.plot(t_lst, f_lst, 'o', c=color,
-                            mew=0, ms=1, alpha=0.8)
-                    ymax = np.percentile(f_lst, self.display_urej)
-                    ymin = f_lst.min()
+                    offset = 0.0
+
+                ax.plot(t_lst, f_lst - offset, 'o', c=color,
+                        mew=0, ms=1, alpha=0.8)
+                ymax = np.percentile(f_lst - offset, self.display_urej)
+                ymin = f_lst.min() - offset
+
+                if self.lc_trends is not None:
+                    trend = self.lc_trends[s]
+                    indices = np.where(np.diff(t_lst) > 0.5)[0]+1
+                    tsplit_lst = np.split(t_lst, indices)
+                    _trend_lst = np.split(trend, indices)
+                    for _t_lst, _trend in zip(tsplit_lst, _trend_lst):
+                        ax.plot(_t_lst, _trend - offset, '-', c='k', lw=0.5)
+
                 yspan = ymax-ymin
                 _y1 = ymin - 0.1*yspan
                 _y2 = ymax + 0.1*yspan
@@ -587,8 +801,7 @@ class MainWindow(tk.Frame):
         axphase.set_ylabel('PDCSAP_FLUX', fontsize=6)
 
         # plot phase folded diagrams
-        if self.period is not np.nan:
-
+        if ~np.isnan(self.period):
 
             for segs in plot_segment_lst:
                 for s in segs:
@@ -603,18 +816,28 @@ class MainWindow(tk.Frame):
                     if self.correct_offset:
                         _offset = self.offset_lst[s]
                     else:
-                        _offset = 0
+                        _offset = 0.0
 
-                    axphase.plot(phase_lst, f_lst - _offset, 'o', color=color,
+                    if self.lc_trends is not None:
+                        trendf = self.lc_trends[s]
+                        newf_lst = f_lst / trendf * self.medflux_lst[s]
+                    else:
+                        newf_lst = f_lst
+
+                    axphase.plot(phase_lst, newf_lst - _offset, 'o', color=color,
                                 mew=0, ms=1, alpha=0.6)
-                    axphase.plot(phase_lst+1, f_lst - _offset, 'o', color=color,
+                    axphase.plot(phase_lst+1, newf_lst - _offset, 'o', color=color,
                                 mew=0, ms=1, alpha=0.6)
-                    axpri.plot(phase_lst, f_lst - _offset, 'o', color=color,
+                    axpri.plot(phase_lst, newf_lst - _offset, 'o', color=color,
                                 mew=0, ms=1, alpha=0.6)
-                    axpri.plot(phase_lst+1, f_lst - _offset, 'o', color=color,
+                    axpri.plot(phase_lst+1, newf_lst - _offset, 'o', color=color,
                                 mew=0, ms=1, alpha=0.6)
-                    axsec.plot(phase_lst, f_lst - _offset, 'o', color=color,
+                    axsec.plot(phase_lst, newf_lst - _offset, 'o', color=color,
                                 mew=0, ms=1, alpha=0.6)
+
+        if self.model_curve is not None:
+            allphase_lst, allflux_lst = self.model_curve
+            axpri.plot(allphase_lst, allflux_lst, '-', lw=0.5, c='k')
        
         # set axpri range
         axpri.set_xlim(1-self.priwin*2, 1+self.priwin*2)
@@ -958,7 +1181,7 @@ class ControlPanel(tk.Frame):
                             text=u'\u2295', width=5, state=tk.DISABLED,
                             command = lambda: self.change_priwin(0.707))
         priwin_label = tk.Label(self, font=label_font, anchor='e',
-                                text='Pri. Window')
+                                text='Primary Window')
         self.zoomout_secwin_button = tk.Button(self,
                             text=u'\u2296', width=5, state=tk.DISABLED,
                             command = lambda: self.change_secwin(1.414))
@@ -966,21 +1189,62 @@ class ControlPanel(tk.Frame):
                             text=u'\u2295', width=5, state=tk.DISABLED,
                             command = lambda: self.change_secwin(0.707))
         secwin_label = tk.Label(self, font=label_font, anchor='e',
-                                text='2nd. Window')
+                                text='Secondary Window')
 
+        self.detrend_label = tk.Label(self,
+                            text='Detrend', font=('TkDefualtFont', 11))
+        self.detrend_win = tk.IntVar(value=20)
+        self.detrend_spinbox = tk.Spinbox(self,
+                            from_        = 10,
+                            to           = 50,
+                            width        = 4,
+                            textvariable = self.detrend_win,
+                            command      = self.adjust_detrend_win,
+                            state        = tk.DISABLED,
+                            wrap         = False,
+                            )
+        self.fit_ooe_button = tk.Button(self,
+                            text='Fit OoE', width=5, state=tk.DISABLED,
+                            command = lambda: self.fit_ooe())
+        self.defit_ooe_button = tk.Button(self,
+                            text='Defit', width=5, state=tk.DISABLED,
+                            command = lambda: self.defit_ooe())
+
+        self.autoperiod_button = tk.Button(self,
+                            text='Auto Period', width=5, state=tk.DISABLED,
+                            command = lambda: self.fit_period_auto())
+
+        self.autofit_button = tk.Button(self,
+                            text='Fit Eclipse', width=5, state=tk.DISABLED,
+                            command = lambda: self.fit_eclipse())
         ################################
         icol += 1
 
         self.zoomout_priwin_button.grid(row=1, column=icol,
                             sticky='w', padx=5, pady=2)
-        self.zoomin_priwin_button.grid(row=1, column=icol+2,
+        self.zoomin_priwin_button.grid(row=1, column=icol+3,
                             sticky='e', padx=5, pady=2)
         self.zoomout_secwin_button.grid(row=2, column=icol,
                             sticky='w', padx=5, pady=2)
-        self.zoomin_secwin_button.grid(row=2, column=icol+2,
+        self.zoomin_secwin_button.grid(row=2, column=icol+3,
                             sticky='e', padx=5, pady=2)
-        priwin_label.grid(row=1, column=icol+1, sticky='ew', padx=5, pady=2)
-        secwin_label.grid(row=2, column=icol+1, sticky='ew', padx=5, pady=2)
+        priwin_label.grid(row=1, column=icol+1, columnspan=2,
+                            sticky='ew', padx=20, pady=2)
+        secwin_label.grid(row=2, column=icol+1, columnspan=2,
+                            sticky='ew', padx=20, pady=2)
+
+        self.detrend_label.grid(row=3, column=icol,
+                            sticky='ew', padx=5, pady=2)
+        self.detrend_spinbox.grid(row=3, column=icol+1,
+                            sticky='ew', padx=5, pady=2)
+        self.fit_ooe_button.grid(row=3, column=icol+2,
+                            sticky='ew', padx=5, pady=2)
+        self.defit_ooe_button.grid(row=3, column=icol+3,
+                            sticky='ew', padx=5, pady=2)
+        self.autoperiod_button.grid(row=4, column=icol, columnspan=2,
+                            sticky='ew', padx=5, pady=2)
+        self.autofit_button.grid(row=4, column=icol+2, columnspan=2,
+                            sticky='ew', padx=5, pady=2)
 
         #sep = ttk.Separator(self, orient='horizontal')
         #sep.grid(row=3, column=icol, columnspan=3, sticky='ew', padx=5, pady=2)
@@ -1077,6 +1341,8 @@ class ControlPanel(tk.Frame):
                                     variable = self.flags[flag],
                                     font     = ('TkDefaultFont', 11),
                                     state    = tk.DISABLED,
+                                    onvalue  = True,
+                                    offvalue = False,
                                     )
                             for flag, text in self.master.master.flag_lst
                             }
@@ -1114,6 +1380,23 @@ class ControlPanel(tk.Frame):
     def adjust_offset(self):
         self.master.master.change_offset(self.correct_offset.get())
 
+    def adjust_detrend_win(self):
+        self.master.master.change_detrendwin(self.detrend_win.get())
+
+    def fit_ooe(self):
+        self.defit_ooe_button['state'] = tk.NORMAL
+        self.master.master.fit_ooe()
+
+    def defit_ooe(self):
+        self.defit_ooe_button['state'] = tk.DISABLED
+        self.master.master.defit_ooe()
+
+    def fit_period_auto(self):
+        self.master.master.fit_period()
+
+    def fit_eclipse(self):
+        self.master.master.fit_eclipse()
+
     def set_button(self, state):
         if state:
 
@@ -1141,11 +1424,17 @@ class ControlPanel(tk.Frame):
             self.zoomin_secwin_button['state'] = tk.NORMAL
             self.zoomout_secwin_button['state'] = tk.NORMAL
 
+            self.detrend_spinbox['state'] = tk.NORMAL
+            self.fit_ooe_button['state'] = tk.NORMAL
+            self.autoperiod_button['state'] = tk.NORMAL
+            self.autofit_button['state'] = tk.NORMAL
+
             # secondary phase buttons
             for key, button in self.add_secphase_buttons.items():
                 button['state'] = tk.NORMAL
             for key, button in self.sub_secphase_buttons.items():
                 button['state'] = tk.NORMAL
+
 
             # apply button
             self.apply_button['state'] = tk.NORMAL
@@ -1162,10 +1451,10 @@ class ControlPanel(tk.Frame):
                 cb['state'] = tk.NORMAL
 
     def update_param(self):
-        text = 'Period = {:.5f} d'.format(self.master.master.period)
+        text = 'Period = {:.7f} d'.format(self.master.master.period)
         self.period_label.config(text=text)
 
-        text = 'T0 = {:.5f}'.format(self.master.master.t0)
+        text = 'T0 = {:.7f}'.format(self.master.master.t0)
         self.t0_label.config(text=text)
 
         text = u'\u03c6 (sec) = {:.4f}'.format(self.master.master.secphase)
@@ -1350,15 +1639,15 @@ class SourceFrame(tk.Frame):
 
         for row in self.source_table:
             tic = row['TIC']
-            period = row['Period'] if row['Period'] is not np.ma.masked else ''
+            period = '{:10.6f}'.format(row['Period']) if row['Period'] is not np.ma.masked else ''
             #t_pri = row['t_pri'] if row['t_pri'] is not np.ma.masked else ''
             #t_sec = row['t_sec'] if row['t_sec'] is not np.ma.masked else ''
-            phi_sec = row['phi_sec'] if row['phi_sec'] is not np.ma.masked else ''
+            phi_sec = '{:6.4f}'.format(row['phi_sec']) if row['phi_sec'] is not np.ma.masked else ''
             subtype = row['subtype'] if row['subtype'] is not np.ma.masked else ''
 
             tag_lst = []
             for flag, text in self.master.master.flag_lst:
-                if row[flag] is not np.ma.masked and row[flag].lower() == 'y':
+                if row[flag] is not np.ma.masked and row[flag]==1:
                     tag_lst.append(flag.upper())
             notes = ', '.join(tag_lst)
 
@@ -1388,7 +1677,9 @@ class SourceFrame(tk.Frame):
         m = self.source_table['TIC']==tic
         row = self.source_table[m][0]
 
+        # set aliases
         mainwin = self.master.master
+        control_panel = mainwin.plot_frame.control_panel
 
         mainwin.tic = tic
         if row['Period'] is not np.ma.masked:
@@ -1401,6 +1692,7 @@ class SourceFrame(tk.Frame):
             mainwin.t0 = row['T0']
         if row['phi_sec'] is not np.ma.masked:
             mainwin.secphase = row['phi_sec']
+
 
         # read light curves
         mainwin.read_lc()
@@ -1424,11 +1716,20 @@ class SourceFrame(tk.Frame):
         mainwin.plot()
         mainwin.plot_frame.canvas.draw()
 
-        mainwin.plot_frame.control_panel.reset_param()
-        mainwin.plot_frame.control_panel.set_button(True)
+        control_panel.reset_param()
+        control_panel.set_button(True)
         # refresh parameters in the control panel
-        mainwin.plot_frame.control_panel.update_param()
-        # need to pass the tags to the control panel TO BE DONE!!
+        control_panel.update_param()
+
+        # check the source table, and set the subtypes
+        if row['subtype'] is not np.ma.masked \
+            and row['subtype'] in control_panel.subtype_rbs:
+            control_panel.subtype.set(row['subtype'])
+
+        # check the source table, and toggle the flag check buttons
+        for flag, var in control_panel.flags.items():
+            if row[flag] is not np.ma.masked and row[flag]==1:
+                control_panel.flag_cbs[flag].select()
 
 
     def apply_params(self):
@@ -1538,7 +1839,7 @@ class SourceFrame(tk.Frame):
         # tags
         for flag, var in control_panel.flags.items():
             if var.get():
-                self.source_table[flag][idx] = 'y'
+                self.source_table[flag][idx] = 1
 
         # activiate save button
         self.source_changed = True
@@ -1665,6 +1966,18 @@ class SectorFrame(tk.Frame):
             self.master.master.plot()
             self.master.master.plot_frame.canvas.draw()
 
+def smooth_trend(t_lst, f_lst, win):
+
+    smooth_x = []
+    smooth_y = []
+    for t1 in np.arange(t_lst[0], t_lst[-1], win):
+        t2 = t1 + win
+        m = (t_lst >= t1) & (t_lst <= t2)
+        if m.sum() <= 3:
+            continue
+        smooth_x.append(np.mean(t_lst[m]))
+        smooth_y.append(np.mean(f_lst[m]))
+    return np.array(smooth_x), np.array(smooth_y)
 
 def launch(source_filename, datapool):
     master = tk.Tk()
@@ -1712,3 +2025,44 @@ def launch(source_filename, datapool):
                             )
     master.mainloop()
 
+
+def get_overlap(d, R1, R2):
+    A = np.zeros_like(d)
+    # no eclipse
+    mask0 = d >= (R1 + R2)
+    A[mask0] = 0.0
+    # total eclipse
+    mask1 = d <= abs(R1 - R2)
+    A[mask1] = np.pi * min(R1, R2)**2
+    # partial eclipse
+    mask2 = (~mask0) & (~mask1)
+    d2 = d[mask2]
+    term1 = R1**2 * np.arccos((d2**2 + R1**2 - R2**2) / (2 * d2 * R1))
+    term2 = R2**2 * np.arccos((d2**2 + R2**2 - R1**2) / (2 * d2 * R2))
+    term3 = 0.5 * np.sqrt(
+        (-d2 + R1 + R2) *
+        ( d2 + R1 - R2) *
+        ( d2 - R1 + R2) *
+        ( d2 + R1 + R2)
+    )
+    A[mask2] = term1 + term2 - term3
+    return A
+
+def ecl_errfunc(p, phase_lst, flux_lst):
+    return flux_lst - get_ecl_kopal(phase_lst, p[0], p[1], p[2], p[3], p[4])
+
+def get_ecl_kopal(phase_lst, F0, R1, R2, inc, u):
+    """
+    """
+
+    phi_lst = 2 * np.pi * phase_lst
+    d = np.sqrt(np.sin(phi_lst)**2 + (np.cos(inc) * np.cos(phi_lst))**2)
+
+    # uniform brightness
+    A = get_overlap(d, R1, R2)
+    delta0 = A / (np.pi * R1**2)
+    # first approximation of linear limb darkening
+    delta1 = delta0 * (1 - 0.5 * delta0)
+    # Kopal flux
+    deltaF = (1 - u) * delta0 + u * delta1
+    return F0*(1.0 - deltaF)
