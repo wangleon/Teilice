@@ -496,7 +496,6 @@ class MainWindow(tk.Frame):
                     disp_lst.append(std)
             disp_lst = np.array(disp_lst)
             disp = (disp_lst**2).sum()/disp_lst.size
-            print('try', ratio, disp)
             return disp
 
 
@@ -575,27 +574,43 @@ class MainWindow(tk.Frame):
         inc = np.deg2rad(90)
         u = 0.2
 
-        newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 100)
-        newf_lst = get_ecl_kopal(newph_lst, f0, r1, r2, inc, u)
+        #newf_lst = get_ecl_kopal(newph_lst, f0, r1, r2, inc, u)
+        p0 = [f0, 0.0, r1, r2, inc, u]
+        p_lower = [0,   -self.priwin, 0.0, 0.0, np.deg2rad(70), 0.0]
+        p_upper = [2*f0, self.priwin, 0.5, 0.5, np.deg2rad(90), 1.0]
 
         result = opt.least_squares(ecl_errfunc,
-                        x0=[f0, r1, r2, inc, u],
-                        bounds=(
-                            [0, 0, 0, np.deg2rad(70), 0],
-                            [2*f0, 0.5, 0.5, np.deg2rad(90), 1]),
+                        x0=p0, bounds=(p_lower, p_upper),
                         args=(allphase_lst, allflux_lst))
-        p = result.x
-        print('R1={:10.6f}'.format(p[1]))
-        print('R2={:10.6f}'.format(p[2]))
-        print('inc={:6.3f}'.format(np.rad2deg(p[3])))
-        print('u={:6.3f}'.format(p[4]))
 
-        newf_lst = get_ecl_kopal(newph_lst, p[0], p[1], p[2], p[3], p[4])
+        if result.success:
+            p = result.x
+            f0     = p[0]
+            phase0 = p[1]
+            r1, r2 = p[2], p[3]
+            inc    = p[4]
+            u      = p[5]
 
-        self.model_curve = (newph_lst, newf_lst)
+            print('ph0={:10.6f}'.format(phase0))
+            print('R1={:10.6f}'.format(r1))
+            print('R2={:10.6f}'.format(r2))
+            print('inc={:6.3f}'.format(np.rad2deg(inc)))
+            print('u={:6.3f}'.format(u))
 
-        self.plot()
-        self.plot_frame.canvas.draw()
+            phase14 = get_kopal_phase14(r1, r2, inc)
+            print(phase14)
+            print(self.priwin)
+            self.priwin = phase14/2
+            print(self.priwin)
+            self.t0 = self.t0 + phase0 * self.period
+
+            newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 500)
+            newf_lst = get_ecl_kopal(newph_lst, f0, 0.0, r1, r2, inc, u)
+
+            self.model_curve = (newph_lst, newf_lst)
+
+            self.plot()
+            self.plot_frame.canvas.draw()
 
     def plot(self):
 
@@ -837,7 +852,7 @@ class MainWindow(tk.Frame):
 
         if self.model_curve is not None:
             allphase_lst, allflux_lst = self.model_curve
-            axpri.plot(allphase_lst, allflux_lst, '-', lw=0.5, c='k')
+            axpri.plot(allphase_lst, allflux_lst, '-', lw=0.5, c='k', alpha=0.8)
        
         # set axpri range
         axpri.set_xlim(1-self.priwin*2, 1+self.priwin*2)
@@ -2040,22 +2055,20 @@ def get_overlap(d, R1, R2):
     term1 = R1**2 * np.arccos((d2**2 + R1**2 - R2**2) / (2 * d2 * R1))
     term2 = R2**2 * np.arccos((d2**2 + R2**2 - R1**2) / (2 * d2 * R2))
     term3 = 0.5 * np.sqrt(
-        (-d2 + R1 + R2) *
-        ( d2 + R1 - R2) *
-        ( d2 - R1 + R2) *
-        ( d2 + R1 + R2)
-    )
+        (-d2 + R1 + R2) * ( d2 + R1 - R2) * ( d2 - R1 + R2) * ( d2 + R1 + R2)
+        )
     A[mask2] = term1 + term2 - term3
     return A
 
 def ecl_errfunc(p, phase_lst, flux_lst):
-    return flux_lst - get_ecl_kopal(phase_lst, p[0], p[1], p[2], p[3], p[4])
+    return flux_lst - get_ecl_kopal(phase_lst, p[0], p[1], p[2], p[3],
+            p[4], p[5])
 
-def get_ecl_kopal(phase_lst, F0, R1, R2, inc, u):
+def get_ecl_kopal(phase_lst, F0, phase0, R1, R2, inc, u):
     """
     """
 
-    phi_lst = 2 * np.pi * phase_lst
+    phi_lst = 2 * np.pi * (phase_lst - phase0)
     d = np.sqrt(np.sin(phi_lst)**2 + (np.cos(inc) * np.cos(phi_lst))**2)
 
     # uniform brightness
@@ -2066,3 +2079,7 @@ def get_ecl_kopal(phase_lst, F0, R1, R2, inc, u):
     # Kopal flux
     deltaF = (1 - u) * delta0 + u * delta1
     return F0*(1.0 - deltaF)
+
+def get_kopal_phase14(r1, r2, inc):
+    return np.arcsin(np.sqrt((r1 + r2)**2 - np.cos(inc)**2)/np.sin(inc))/np.pi
+
