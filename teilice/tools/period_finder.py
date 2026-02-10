@@ -363,11 +363,11 @@ class MainWindow(tk.Frame):
         self.plot_frame.canvas.draw()
 
     def change_t0(self, level):
-        self.t0 = self.t0 + self.period * level
+        self.set_t0(self.t0 + self.period * level)
         # refresh t0
-        self.plot_frame.control_panel.update_param()
-        self.plot()
-        self.plot_frame.canvas.draw()
+        #self.plot_frame.control_panel.update_param()
+        #self.plot()
+        #self.plot_frame.canvas.draw()
 
     def set_t0(self, t0):
         self.t0 = t0
@@ -378,8 +378,6 @@ class MainWindow(tk.Frame):
 
     def set_secphase(self, secphase):
         self.secphase = secphase
-        # refresh secphase
-        print(self.secphase)
         self.plot_frame.control_panel.update_param()
         self.plot()
         self.plot_frame.canvas.draw()
@@ -395,10 +393,10 @@ class MainWindow(tk.Frame):
         self.plot_frame.canvas.draw()
 
     def change_secphase(self, v):
-        self.secphase = self.secphase + v
-        self.plot_frame.control_panel.update_param()
-        self.plot()
-        self.plot_frame.canvas.draw()
+        self.set_secphase(self.secphase + v)
+        #self.plot_frame.control_panel.update_param()
+        #self.plot()
+        #self.plot_frame.canvas.draw()
 
     def change_urej(self, urej):
         self.display_urej = urej
@@ -596,7 +594,7 @@ class MainWindow(tk.Frame):
             m0 = newmask_lst * m1
 
             for _ph, _f, in zip(newphase_lst[m0], newflux_lst[m0]):
-                allphase_lst.append(_ph+1)
+                allphase_lst.append(_ph)
                 allflux_lst.append(_f)
 
         allphase_lst = np.array(allphase_lst)
@@ -614,7 +612,7 @@ class MainWindow(tk.Frame):
         if model == 'kopal':
 
             inc = np.deg2rad(88)
-            u = 0.2
+            u = 0.8
 
             if eclipse == 'primary':
                 phase0 = 0.0
@@ -638,29 +636,32 @@ class MainWindow(tk.Frame):
                             args=(allphase_lst, allflux_lst))
 
             if result.success:
-                p = result.x
-                f0     = p[0]
-                phase0 = p[1]
-                r1, r2 = p[2], p[3]
-                inc    = p[4]
-                u      = p[5]
-                
-                print('ph0={:10.6f}'.format(phase0))
-                print('R1={:10.6f}'.format(r1))
-                print('R2={:10.6f}'.format(r2))
-                print('inc={:6.3f}'.format(np.rad2deg(inc)))
-                print('u={:6.3f}'.format(u))
+                p        = result.x
+                residual = result.fun
+                dof      = len(residual) - len(p)
+                s2       = np.sum(residual**2)/dof
+                jac      = result.jac
+                cov      = s2 * np.linalg.inv(jac.T @ jac)
+                perr     = np.sqrt(np.diag(cov))
+                f0, phase0, r1, r2, inc, u = p
+                f0_err, phase0_err, r1_err, r2_err, inc_err, u_err = perr
+
+                print('F0={:.3f}pm{:.3f}'.format(f0, f0_err))
+                print('ph0={:10.6f}pm{:.6f}'.format(phase0, phase0_err))
+                print('R1={:10.6f}pm{:.6f}'.format(r1, r1_err))
+                print('R2={:10.6f}pm{:.6f}'.format(r2, r2_err))
+                print('inc={:6.3f}pm{:.3f}'.format(np.rad2deg(inc), np.rad2deg(inc_err)))
+                print('u={:6.3f}pm{:.3f}'.format(u, u_err))
                 
                 phase14 = get_kopal_phase14(r1, r2, inc)
                 if eclipse == 'primary':
                     # update T0
-                    t0 = self.t0 + phase0 * self.period
-                    self.set_t0(t0)
+                    self.t0 = self.t0 + phase0 * self.period
                     self.priwin = phase14/2
                     newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 500)
                     newf_lst = get_ecl_kopal(newph_lst, f0, 0.0, r1, r2, inc, u)
                 elif eclipse == 'secondary':
-                    self.set_secphase(phase0)
+                    self.secphase = phase0
                     self.secwin = phase14/2
                     newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 500)
                     newf_lst = get_ecl_kopal(newph_lst, f0, self.secphase, r1, r2, inc, u)
@@ -668,13 +669,62 @@ class MainWindow(tk.Frame):
                     raise ValueError
 
                 self.model_curve[eclipse] = (newph_lst, newf_lst)
+                self.plot_frame.control_panel.update_param()
                 self.plot()
                 self.plot_frame.canvas.draw()
         elif model == 'trapz':
-            pass
-            #depth = np.abs(allphase_lst
+            fbase = np.percentile(allflux_lst, 10)
+            depth0 = 1-fbase/f0
+            if eclipse == 'primary':
+                phase0 = 0.0
+                ph14 = 2*self.priwin
+                ph23 = self.priwin
+                p0 = [f0, phase0, depth0, ph14, ph23]
+                p_lower = [0.0,  -2*self.priwin, 0.0, 0.0,    0.0]
+                p_upper = [2*f0,  2*self.priwin, 1.0, 2*ph14, 2*ph14]
+            elif eclipse == 'secondary':
+                phase0 = self.secphase*1.0
+                ph14 = 2*self.secwin
+                ph23 = 1*self.secwin
+                p0 = [f0, phase0, depth0, ph14, ph23]
+                p_lower = [0.0,  phase0-2*self.secwin, 0.0, 0.0,    0.0]
+                p_upper = [2*f0, phase0+2*self.secwin, 1.0, 2*ph14, 2*ph14]
+            else:
+                raise ValueError
+
+            result = opt.least_squares(ecl_errfunc_trapz,
+                    x0=p0, bounds=(p_lower, p_upper),
+                    args=(allphase_lst, allflux_lst), xtol=1e-10)
+            if result.success:
+                p        = result.x
+                residual = result.fun
+                dof      = len(residual) - len(p)
+                s2       = np.sum(residual**2)/dof
+                jac      = result.jac
+                cov      = s2 * np.linalg.inv(jac.T @ jac)
+                perr     = np.sqrt(np.diag(cov))
+                f0, phase0, depth, phase14, phase23 = p
+                f0_err, phase0_err, depth_err, phase14_err, phase23_err = perr
 
 
+                if eclipse == 'primary':
+                    # update T0
+                    self.t0 = self.t0 + phase0 * self.period
+                    self.priwin = phase14/2
+                    newph_lst = np.linspace(-2*self.priwin, +2*self.priwin, 500)
+                    newf_lst = get_ecl_trapz(newph_lst, f0, 0.0, depth, phase14, phase23)
+                    self.model_curve[eclipse] = (newph_lst+1, newf_lst)
+                elif eclipse == 'secondary':
+                    self.secphase = phase0
+                    self.secwin = phase14/2
+                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 500)
+                    newf_lst = get_ecl_trapz(newph_lst, f0, self.secphase, depth, phase14, phase23)
+                    self.model_curve[eclipse] = (newph_lst, newf_lst)
+                else:
+                    raise ValueError
+                self.plot_frame.control_panel.update_param()
+                self.plot()
+                self.plot_frame.canvas.draw()
 
 
     def plot(self):
@@ -1193,8 +1243,8 @@ class ControlPanel(tk.Frame):
 
 
         ######## set column 2 #####################
-        self.t0_label = tk.Label(self,
-                    text='T0', font=('TkDefaultFont', 11))
+        self.t0_label = tk.Label(self, text='T0',
+                font=('TkDefaultFont', 11))
         self.t0_subhalf_button = tk.Button(self,
                 text='T0 - 1/2 Period', width=15, state=tk.DISABLED,
                 command=lambda: self.change_t0(-0.5))
@@ -1256,8 +1306,6 @@ class ControlPanel(tk.Frame):
         sepv2 = ttk.Separator(self, orient='vertical')
         sepv2.grid(row=1, column=icol, rowspan=6, sticky='ns', padx=10)
 
-
-
         ################
         self.secphase_label = tk.Label(self,
                 text=u'\u03c6 (sec)', font=('TKDefualtFont', 11))
@@ -1303,12 +1351,17 @@ class ControlPanel(tk.Frame):
         for key, label in secphase_level_labels.items():
             label.grid(row=key, column=icol+1, sticky='ew', padx=28, pady=2)
 
-        ############## add a vertical separator
         icol += 3
+        ############## add a vertical separator
         sepv3 = ttk.Separator(self, orient='vertical')
         sepv3.grid(row=1, column=icol, rowspan=6, sticky='ns', padx=10)
+        icol += 1
 
         ########### set column 3 #############################
+
+        self.tdur_label = tk.Label(self, text='Tdur',
+                            font=('TkDefualtFont',11))
+
         self.zoomout_priwin_button = tk.Button(self,
                             text=u'\u2296', width=5, state=tk.DISABLED,
                             command = lambda: self.change_priwin(1.414))
@@ -1406,7 +1459,7 @@ class ControlPanel(tk.Frame):
 
 
         ################################
-        icol += 1
+        self.tdur_label.grid(row=0, column=icol, columnspan=4, sticky='ew')
 
         self.zoomout_priwin_button.grid(row=1, column=icol,
                             sticky='w', padx=5, pady=2)
@@ -1454,12 +1507,6 @@ class ControlPanel(tk.Frame):
 
 
         ####### 
-        self.apply_button = tk.Button(self,
-                                text  = 'Apply',
-                                width = 15,
-                                state = tk.DISABLED,
-                                command = self.apply_params,
-                                )
 
         self.subtype = tk.StringVar(value='detached')
         self.subtype_rbs = {
@@ -1495,14 +1542,28 @@ class ControlPanel(tk.Frame):
                             }
 
 
-        self.apply_button.grid(row=0, column=icol, columnspan=2,
-                sticky='ew', padx=5, pady=2)
         for icb, subtype in enumerate(['detached', 'contact']):
             self.subtype_rbs[subtype].grid(row=1, column=icol+icb,
                     sticky='ew', padx=5, pady=2)
         for i, (flag, cb) in enumerate(self.flag_cbs.items()):
-            cb.grid(row=2+i, column=icol, columnspan=2,
+            cb.grid(row=i+2, column=icol, columnspan=2,
                     sticky='w', padx=5, pady=2)
+
+        icol += 2
+        ############## add a vertical separator
+        sepv5 = ttk.Separator(self, orient='vertical')
+        sepv5.grid(row=1, column=icol, rowspan=6, sticky='ns', padx=10)
+        icol += 1
+
+        #############################3
+        self.apply_button = tk.Button(self,
+                                text  = 'Apply',
+                                width = 15,
+                                state = tk.DISABLED,
+                                command = self.apply_params,
+                                )
+        self.apply_button.grid(row=1, column=icol,
+                sticky='ew', padx=5, pady=2)
 
         self.pack()
 
@@ -1624,8 +1685,13 @@ class ControlPanel(tk.Frame):
         text = 'T0 = {:.7f}'.format(self.master.master.t0)
         self.t0_label.config(text=text)
 
-        text = u'\u03c6 (sec) = {:.4f}'.format(self.master.master.secphase)
+        text = u'\u03c6 (sec) = {:.5f}'.format(self.master.master.secphase)
         self.secphase_label.config(text=text)
+
+        tdur_pri = self.master.master.period * self.master.master.priwin * 2
+        tdur_sec = self.master.master.period * self.master.master.secwin * 2
+        text = 'Tdur = {:.7f}/{:.7f} d'.format(tdur_pri, tdur_sec)
+        self.tdur_label.config(text=text)
 
     def reset_param(self):
         # reset upper rejection spinbox
@@ -2213,25 +2279,6 @@ def launch(source_filename, datapool, figure_path=None, folded_path=None):
     master.mainloop()
 
 
-def get_overlap(d, R1, R2):
-    A = np.zeros_like(d)
-    # no eclipse
-    mask0 = d >= (R1 + R2)
-    A[mask0] = 0.0
-    # total eclipse
-    mask1 = d <= abs(R1 - R2)
-    A[mask1] = np.pi * min(R1, R2)**2
-    # partial eclipse
-    mask2 = (~mask0) & (~mask1)
-    d2 = d[mask2]
-    term1 = R1**2 * np.arccos((d2**2 + R1**2 - R2**2) / (2 * d2 * R1))
-    term2 = R2**2 * np.arccos((d2**2 + R2**2 - R1**2) / (2 * d2 * R2))
-    term3 = 0.5 * np.sqrt(
-        (-d2 + R1 + R2) * ( d2 + R1 - R2) * ( d2 - R1 + R2) * ( d2 + R1 + R2)
-        )
-    A[mask2] = term1 + term2 - term3
-    return A
-
 def ecl_errfunc_kopal(p, phase_lst, flux_lst):
     return flux_lst - get_ecl_kopal(phase_lst, p[0], p[1], p[2], p[3],
             p[4], p[5])
@@ -2244,33 +2291,54 @@ def get_ecl_kopal(phase_lst, F0, phase0, R1, R2, inc, u):
     """
 
     phi_lst = 2 * np.pi * (phase_lst - phase0)
-    d = np.sqrt(np.sin(phi_lst)**2 + (np.cos(inc) * np.cos(phi_lst))**2)
+    # d_lst is the projection separation
+    d_lst = np.sqrt(np.sin(phi_lst)**2 + (np.cos(inc) * np.cos(phi_lst))**2)
 
     # uniform brightness
-    A = get_overlap(d, R1, R2)
-    delta0 = A / (np.pi * R1**2)
+    # A_lst is the overlap area
+    A_lst = np.zeros_like(d_lst)
+    # no eclipse
+    m0 = d_lst >= (R1 + R2)
+    # total eclipse
+    m1 = d_lst <= abs(R1 - R2)
+    A_lst[m1] = np.pi * min(R1, R2)**2
+    # partial eclipse
+    m2 = (~m0) & (~m1)
+    d2_lst = d_lst[m2]
+    term1 = R1**2 * np.arccos((d2_lst**2 + R1**2 - R2**2) / (2 * d2_lst * R1))
+    term2 = R2**2 * np.arccos((d2_lst**2 + R2**2 - R1**2) / (2 * d2_lst * R2))
+    term3 = 0.5 * np.sqrt(
+        (-d2_lst + R1 + R2) * ( d2_lst + R1 - R2) *
+        ( d2_lst - R1 + R2) * ( d2_lst + R1 + R2)
+        )
+    A_lst[m2] = term1 + term2 - term3
+
+    delta0_lst = A_lst / (np.pi * R1**2)
     # first approximation of linear limb darkening
-    delta1 = delta0 * (1 - 0.5 * delta0)
+    delta1_lst = delta0_lst * (1 - 0.5 * delta0_lst)
     # Kopal flux
-    deltaF = (1 - u) * delta0 + u * delta1
-    return F0*(1.0 - deltaF)
+    deltaF_lst = (1 - u) * delta0_lst + u * delta1_lst
+    return F0*(1.0 - deltaF_lst)
 
 def get_kopal_phase14(r1, r2, inc):
     return np.arcsin(np.sqrt((r1 + r2)**2 - np.cos(inc)**2)/np.sin(inc))/np.pi
 
+
 def get_ecl_trapz(phase_lst, F0, phase0, depth, ph14, ph23):
     ph12 = (ph14 - ph23)/2
     if ph12 <= 0:
-        m1 = np.abs(phase_lst) > ph14/2
+        # triangle shape
+        m1 = np.abs(phase_lst-phase0) > ph14/2
         flux = np.ones_like(phase_lst)
         flux[~m1] = 1 - depth
         return F0 * flux
     else:
+        # trapezoiod shape
         flux = np.ones_like(phase_lst)
-        m1 = np.abs(phase_lst) < ph23/2
+        m1 = np.abs(phase_lst-phase0) < ph23/2
         flux[m1] = 1 - depth
-        m2 = ( ~m1 ) * (np.abs(phase_lst) < ph14/2)
+        m2 = ( ~m1 ) * (np.abs(phase_lst-phase0) < ph14/2)
         k = depth/ph12
         b = 1 - depth*ph14/(ph14-ph23)
-        flux[m2] =  k * np.abs(phase_lst[m2]) + b
+        flux[m2] =  k * np.abs((phase_lst-phase0)[m2]) + b
         return F0 * flux
