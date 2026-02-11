@@ -169,11 +169,21 @@ class MainWindow(tk.Frame):
 
         # orbital parameters
         self.period = np.nan # orbital period
-        self.t0 = np.nan     # t0
-        self.secphase = 0.5  # phase of secondary eclipse
-        self.priwin = 0.05 # window of primary eclipse
-        self.secwin = 0.05 # window of secondary eclipse
+        self.period_err = np.nan # period error
+        self.t0     = np.nan     # t0
+        self.t0_err = np.nan     # t0 error
+        self.secphase    = 0.5  # phase of secondary eclipse
+        self.secphase_err = np.nan # seondary phase error
+        self.priwin       = 0.05 # window of primary eclipse
+        self.priwin_err = np.nan # primary window error
+        self.secwin     = 0.05   # window of secondary eclipse
+        self.secwin_err = np.nan # seondary window error
 
+        # model fit info
+        self.model_info = {
+                'primary': None,
+                'secondary': None,
+                }
 
         self.source_changed = False
 
@@ -355,8 +365,12 @@ class MainWindow(tk.Frame):
         #self.plot()
         #self.plot_frame.canvas.draw()
 
-    def set_period(self, p):
+    def set_period(self, p, p_err=None):
         self.period = p
+        if p_err is not None:
+            self.period_err = p_err
+        else:
+            self.period_err = np.nan
         # refresh period
         self.plot_frame.control_panel.update_param()
         self.plot()
@@ -453,9 +467,12 @@ class MainWindow(tk.Frame):
     def fit_period(self, option):
 
         data_lst = self.prepare_parsed_lc()
+        nsep = 20
 
-        def get_disp_lst(data_lst, period, ph1, ph2, nsep):
-            disp_lst = []
+        param = {'npoints': 0, 'nbins': 0}
+
+        def get_var_lst(data_lst, period, ph1, ph2, nsep):
+            var_lst = []
             dphase = (ph2 - ph1) / nsep
             for i in np.arange(nsep):
                 _ph1 = ph1 + i * dphase
@@ -478,61 +495,95 @@ class MainWindow(tk.Frame):
                     # now phase list is between (-1, 1)
                     m1 = (newphase_lst > _ph1) & (newphase_lst < _ph2)
                     m0 = newm * m1
-                    if m0.sum() > 3:
-                        for v in newflux_lst[m0]:
-                            allflux_lst.append(v)
-                
-                allflux_lst = np.array(allflux_lst)
-                if allflux_lst.size > 0:
-                    std = allflux_lst.std()
-                    disp_lst.append(std)
-            return np.array(disp_lst)
+                    if m0.sum() == 0:
+                        continue
+                    for v in newflux_lst[m0]:
+                        allflux_lst.append(v)
 
-        def get_disp(ratio):
+                # calculate var for this box (_ph1, _ph2)
+                allflux_lst = np.array(allflux_lst)
+                if allflux_lst.size > 3:
+                    var = allflux_lst.var(ddof=0)
+                    # append this to var_lst
+                    var_lst.append(var)
+                    # count number of data points
+                    param['npoints'] += allflux_lst.size
+            return np.array(var_lst)
+
+        def cost(ratio):
             period = self.period * (1 + ratio)
-            nsep = 20
-            all_disp_lst = []
+            all_var_lst = []
+            param['npoints'] = 0
+            param['nbins'] = 0
             if option == 'primary':
-                disp_lst = get_disp_lst(data_lst, period,
+                var_lst = get_var_lst(data_lst, period,
                             -2*self.priwin,
                             2*self.priwin,
                             nsep)
-                for v in disp_lst:
-                    all_disp_lst.append(v)
+                for v in var_lst:
+                    all_var_lst.append(v)
+                    param['nbins'] += 1
 
             elif option == 'secondary':
-                disp_lst = get_disp_lst(data_lst, period,
+                var_lst = get_var_lst(data_lst, period,
                             self.secphase-2*self.secwin,
                             self.secphase+2*self.secwin,
                             nsep)
-                for v in disp_lst:
-                    all_disp_lst.append(v)
+                for v in var_lst:
+                    all_var_lst.append(v)
+                    param['nbins'] += 1
 
             elif option == 'both':
-                disp_lst = get_disp_lst(data_lst, period,
+                var_lst = get_var_lst(data_lst, period,
                             -2*self.priwin,
                             2*self.priwin,
                             nsep)
-                for v in disp_lst:
-                    all_disp_lst.append(v)
-                disp_lst = get_disp_lst(data_lst, period,
+                for v in var_lst:
+                    all_var_lst.append(v)
+                    param['nbins'] += 1
+                var_lst = get_var_lst(data_lst, period,
                             self.secphase-2*self.secwin,
                             self.secphase+2*self.secwin,
                             nsep)
-                for v in disp_lst:
-                    all_disp_lst.append(v)
+                for v in var_lst:
+                    all_var_lst.append(v)
+                    param['nbins'] += 1
 
-            all_disp_lst = np.array(all_disp_lst)
-            disp = (all_disp_lst**2).sum()/all_disp_lst.size
-            return disp
+            all_var_lst = np.array(all_var_lst)
+            return all_var_lst.sum()
 
-        result = opt.minimize_scalar(get_disp,
+        result = opt.minimize_scalar(cost,
                     bracket=(-0.01, 0, 0.01), tol=1e-7, method='Brent')
         if result.success:
             newratio = result.x
+
+            # using chi2 profile method to determine the error of newratio
+            # degree of freedom
+            nu = param['npoints'] - param['nbins']
+            Cmin = result.fun
+            C_target = Cmin + Cmin/nu
+            f_root = lambda theta: cost(theta) - C_target
+            delta = 1e-6
+            a = newratio - delta
+            while f_root(a) < 0:
+                delta *= 2
+                a = newratio - delta
+            newratio_left = opt.brentq(f_root, a, newratio)
+
+            # move right
+            delta = 1e-6
+            b = newratio + delta
+            while f_root(b) < 0:
+                delta *= 2
+                b = newratio + delta
+            newratio_right = opt.brentq(f_root, newratio, b)
+            sigma_ratio = 0.5 * (newratio_right - newratio_left)
+
             new_period = self.period * (1 + newratio)
+            new_period_err = self.period * sigma_ratio
+
             # will trigger plot() function here
-            self.set_period(new_period)
+            self.set_period(new_period, new_period_err)
 
     def prepare_parsed_lc(self):
         data_lst = {}
@@ -646,27 +697,61 @@ class MainWindow(tk.Frame):
                 f0, phase0, r1, r2, inc, u = p
                 f0_err, phase0_err, r1_err, r2_err, inc_err, u_err = perr
 
-                print('F0={:.3f}pm{:.3f}'.format(f0, f0_err))
-                print('ph0={:10.6f}pm{:.6f}'.format(phase0, phase0_err))
-                print('R1={:10.6f}pm{:.6f}'.format(r1, r1_err))
-                print('R2={:10.6f}pm{:.6f}'.format(r2, r2_err))
-                print('inc={:6.3f}pm{:.3f}'.format(np.rad2deg(inc), np.rad2deg(inc_err)))
-                print('u={:6.3f}pm{:.3f}'.format(u, u_err))
+                #print('F0={:.3f}pm{:.3f}'.format(f0, f0_err))
+                #print('ph0={:10.6f}pm{:.6f}'.format(phase0, phase0_err))
+                #print('R1={:10.6f}pm{:.6f}'.format(r1, r1_err))
+                #print('R2={:10.6f}pm{:.6f}'.format(r2, r2_err))
+                #print('inc={:6.3f}pm{:.3f}'.format(np.rad2deg(inc), np.rad2deg(inc_err)))
+                #print('u={:6.3f}pm{:.3f}'.format(u, u_err))
                 
                 phase14 = get_kopal_phase14(r1, r2, inc)
+                #phase14_err = get_kopal_phase14_err(r1, r1_err, r2, r2_err, inc, inc_err)
+                std = residual.std()
+
+                fbase = get_ecl_kopal(0.0, f0, 0.0, r1, r2, inc, u)
+                depth = (f0 - fbase)/f0
+                nbase = (allflux_lst < fbase + std).sum()
+                depth_err = std/f0/np.sqrt(nbase)
+                #print('depth = {} {}'.format(depth, depth_err), nbase)
+
                 if eclipse == 'primary':
                     # update T0
                     self.t0 = self.t0 + phase0 * self.period
+                    self.t0_err = phase0_err * self.period
                     self.priwin = phase14/2
-                    newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 500)
+                    newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 1000)
                     newf_lst = get_ecl_kopal(newph_lst, f0, 0.0, r1, r2, inc, u)
+                    n0 = (newf_lst < f0-1e-6).sum()
+                    n1 = (newf_lst < f0-std).sum()
+                    relerr = (n0 - n1)/n0/2*np.sqrt(2)
+                    phase14_err = phase14 * relerr
+                    self.priwin_err = self.priwin * relerr
                 elif eclipse == 'secondary':
                     self.secphase = phase0
+                    self.secphase_err = phase0_err
                     self.secwin = phase14/2
-                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 500)
+                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 1000)
                     newf_lst = get_ecl_kopal(newph_lst, f0, self.secphase, r1, r2, inc, u)
+                    n0 = (newf_lst < f0-1e-6).sum()
+                    n1 = (newf_lst < f0-std).sum()
+                    relerr = (n0 - n1)/n0/2*np.sqrt(2)
+                    phase14_err = phase14 * relerr
+                    self.secwin_err = self.secwin * relerr
                 else:
                     raise ValueError
+                # save model info
+
+                self.model_info[eclipse] = {
+                        'name': 'kopal',
+                        'phase0': phase0, 'phase0_err': phase0_err,
+                        'f0': f0, 'f0_err': f0_err,
+                        'r1': r1, 'r1_err': r1_err,
+                        'r2': r2, 'r2_err': r2_err,
+                        'inc': np.rad2deg(inc), 'inc_err': np.rad2deg(inc_err),
+                        'u': u, 'u_err': u_err,
+                        'depth': depth, 'depth_err': depth_err,
+                        'phase14': phase14, 'phase14_err': phase14_err,
+                        }
 
                 self.model_curve[eclipse] = (newph_lst, newf_lst)
                 self.plot_frame.control_panel.update_param()
@@ -706,22 +791,35 @@ class MainWindow(tk.Frame):
                 f0, phase0, depth, phase14, phase23 = p
                 f0_err, phase0_err, depth_err, phase14_err, phase23_err = perr
 
-
                 if eclipse == 'primary':
                     # update T0
                     self.t0 = self.t0 + phase0 * self.period
+                    self.t0_err = phase0_err * self.period
                     self.priwin = phase14/2
-                    newph_lst = np.linspace(-2*self.priwin, +2*self.priwin, 500)
+                    self.priwin_err = phase14_err/2
+                    newph_lst = np.linspace(-2*self.priwin, +2*self.priwin, 1000)
                     newf_lst = get_ecl_trapz(newph_lst, f0, 0.0, depth, phase14, phase23)
                     self.model_curve[eclipse] = (newph_lst+1, newf_lst)
                 elif eclipse == 'secondary':
                     self.secphase = phase0
+                    self.secphase_err = phase0_err
                     self.secwin = phase14/2
-                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 500)
+                    self.secwin_err = phase14_err/2
+                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 1000)
                     newf_lst = get_ecl_trapz(newph_lst, f0, self.secphase, depth, phase14, phase23)
                     self.model_curve[eclipse] = (newph_lst, newf_lst)
                 else:
                     raise ValueError
+
+                self.model_info[eclipse] = {
+                        'name': 'trapz',
+                        'phase0': phase0, 'phase0_err': phase0_err,
+                        'f0': f0, 'f0_err': f0_err,
+                        'phase14': phase14, 'phase14_err': phase14_err,
+                        'phase23': phase23, 'phase23_err': phase23_err,
+                        'depth': depth, 'depth_err': depth_err,
+                        }
+
                 self.plot_frame.control_panel.update_param()
                 self.plot()
                 self.plot_frame.canvas.draw()
@@ -1679,18 +1777,45 @@ class ControlPanel(tk.Frame):
                 cb['state'] = tk.NORMAL
 
     def update_param(self):
-        text = 'Period = {:.7f} d'.format(self.master.master.period)
+
+        mainwin = self.master.master
+        if np.isnan(mainwin.period_err):
+            text = 'Period = {:.7f} d'.format(mainwin.period)
+        else:
+            text = 'Period = {:.7f} \xb1 {:5.1e} d'.format(
+                    mainwin.period, mainwin.period_err)
         self.period_label.config(text=text)
 
-        text = 'T0 = {:.7f}'.format(self.master.master.t0)
+
+        if np.isnan(mainwin.t0_err):
+            text = 'T0 = {:.7f}'.format(mainwin.t0)
+        else:
+            text = 'T0 = {:.7f} \xb1 {:5.1e}'.format(
+                    mainwin.t0, mainwin.t0_err)
         self.t0_label.config(text=text)
 
-        text = u'\u03c6 (sec) = {:.5f}'.format(self.master.master.secphase)
+        if np.isnan(mainwin.secphase_err):
+            text = u'\u03c6 (sec) = {:.5f}'.format(mainwin.secphase)
+        else:
+            text = u'\u03c6 (sec) = {:.5f} \xb1 {:5.1e}'.format(
+                    mainwin.secphase, mainwin.secphase_err)
         self.secphase_label.config(text=text)
 
-        tdur_pri = self.master.master.period * self.master.master.priwin * 2
-        tdur_sec = self.master.master.period * self.master.master.secwin * 2
-        text = 'Tdur = {:.7f}/{:.7f} d'.format(tdur_pri, tdur_sec)
+        tdur_pri = mainwin.period * mainwin.priwin * 2
+        tdur_sec = mainwin.period * mainwin.secwin * 2
+        text1 = '{:.7f}/{:.7f}'.format(tdur_pri, tdur_sec)
+
+        
+        if ~np.isnan(mainwin.priwin_err) or ~np.isnan(mainwin.secwin_err):
+            text2 = '{}/{}'.format(
+                        '{:5.1e}'.format(mainwin.period * mainwin.priwin_err * 2)
+                            if ~np.isnan(mainwin.priwin_err) else 'nan',
+                        '{:5.1e}'.format(mainwin.period * mainwin.secwin_err * 2)
+                            if ~np.isnan(mainwin.secwin_err) else 'nan'
+                        )
+            text = 'Tdur = {} \xb1 {} d'.format(text1, text2)
+        else:
+            text = 'Tdur = {} d'.format(text1)
         self.tdur_label.config(text=text)
 
     def reset_param(self):
@@ -2083,7 +2208,10 @@ class SourceFrame(tk.Frame):
         self.save_button['state'] = tk.NORMAL
 
 
-        # save folded light curve
+        fname = 'foldedlc-{:012d}_s{:03d}_s{:03d}.fits'.format(
+                mainwin.tic, s1, s2)
+        filename = mainwin.folded_path / fname
+        self.save_fits(filename)
 
         # save foleded figures
         figname = 'fig-fold-{:012d}_s{:03d}_s{:03d}.png'.format(
@@ -2091,6 +2219,128 @@ class SourceFrame(tk.Frame):
         figfilename = mainwin.figure_path / figname
         mainwin.plot_frame.fig.savefig(figfilename)
 
+
+    def save_fits(self, filename):
+
+        mainwin = self.master.master
+
+        # save folded light curve
+        head = fits.Header()
+        head.append(('TIC', mainwin.tic))
+        head.append(('COR_OFF', mainwin.correct_offset))
+        head.append(('MEDFLUX', mainwin.medflux))
+        head.append(('DTR_WIN', mainwin.detrendwin))
+        if np.isnan(mainwin.period):
+            head.append(('PERIOD', -1))
+        else:
+            head.append(('PERIOD', mainwin.period))
+        if np.isnan(mainwin.period_err):
+            head.append(('PERIOD_E', -1))
+        else:
+            head.append(('PERIOD_E', mainwin.period_err))
+        if np.isnan(mainwin.t0):
+            head.append(('T0', -1))
+        else:
+            head.append(('T0', mainwin.t0))
+        if np.isnan(mainwin.t0_err):
+            head.append(('T0_E', -1))
+        else:
+            head.append(('T0_E', mainwin.t0_err))
+        if np.isnan(mainwin.secphase):
+            head.append(('SECPH', -1))
+        else:
+            head.append(('SECPH', mainwin.secphase))
+        if np.isnan(mainwin.secphase_err):
+            head.append(('SECPH_E', -1))
+        else:
+            head.append(('SECPH_E', mainwin.secphase_err))
+        if np.isnan(mainwin.priwin):
+            head.append(('PRIWIN', -1))
+        else:
+            head.append(('RPIWIN', mainwin.priwin))
+        if np.isnan(mainwin.priwin_err):
+            head.append(('PRIWIN_E', -1))
+        else:
+            head.append(('RPIWIN_E', mainwin.priwin_err))
+        if np.isnan(mainwin.secwin):
+            head.append(('SECWIN', -1))
+        else:
+            head.append(('SECWIN', mainwin.secwin))
+        if np.isnan(mainwin.secwin_err):
+            head.append(('SECWIN_E', -1))
+        else:
+            head.append(('SECWIN_E', mainwin.secwin_err))
+
+        control_panel = mainwin.plot_frame.control_panel
+
+        subtype = control_panel.subtype.get()
+        head.append(('SUBTYPE', subtype))
+        for flag, var in control_panel.flags.items():
+            if var.get():
+                head.append(('FLAG_'+flag.upper(), True))
+            else:
+                head.append(('FLAG_'+flag.upper(), False))
+
+        for ecl in ['primary', 'secondary']:
+            model = mainwin.model_info[ecl]
+            if model is not None:
+                name = model['name']
+                head.append(('PRIMODEL', name))
+                if name == 'kopal':
+                    head.append(('PH0',    model['phase0']))
+                    head.append(('PH0_E',  model['phase0_err']))
+                    head.append(('F0',     model['f0']))
+                    head.append(('F0_E',   model['f0_err']))
+                    head.append(('R1',     model['r1']))
+                    head.append(('R1_E',   model['r1_err']))
+                    head.append(('R2',     model['r2']))
+                    head.append(('R2_E',   model['r2_err']))
+                    head.append(('INC',    model['inc']))
+                    head.append(('INC_E',  model['inc_err']))
+                    head.append(('U',      model['u']))
+                    head.append(('U_E',    model['u_err']))
+                    head.append(('DEP',    model['depth']))
+                    head.append(('DEP_E',  model['depth_err']))
+                    head.append(('PH14',   model['phase14']))
+                    head.append(('PH14_E', model['phase14_err']))
+                elif name == 'trapz':
+                    head.append(('PH0',    model['phase0']))
+                    head.append(('PH0_E',  model['phase0_err']))
+                    head.append(('F0',     model['f0']))
+                    head.append(('F0_E',   model['f0_err']))
+                    head.append(('DEP',    model['depth']))
+                    head.append(('DEP_E',  model['depth_err']))
+                    head.append(('PH14',   model['phase14']))
+                    head.append(('PH14_E', model['phase14_err']))
+                    head.append(('PH23',   model['phase23']))
+                    head.append(('PH23_E', model['phase23_err']))
+
+        hdulst = fits.HDUList([
+                    fits.PrimaryHDU(header=head)
+                ])
+
+        for s, (t_lst, f_lst) in sorted(mainwin.lc_lst.items()):
+            subhead = fits.Header()
+            subhead.append(('SECTOR', s))
+            subhead.append(('OFFSET', mainwin.offset_lst[s]))
+
+            mask_lst = mainwin.lc_mask[s]
+            for i, (t1, t2) in enumerate(mask_lst):
+                subhead.append(('MASK{:03d}1'.format(i), t1))
+                subhead.append(('MASK{:03d}2'.format(i), t2))
+
+            if s in mainwin.lc_trends:
+                trendf = mainwin.lc_trends[s]
+            else:
+                trendf = np.zeros_like(t_lst)
+            t = Table()
+            t.add_column(t_lst, name='TIME')
+            t.add_column(f_lst, name='PDCSAP_FLUX')
+            t.add_column(trendf, name='OOE_FLUX')
+            hdulst.append(fits.BinTableHDU(data=t, header=subhead))
+
+        hdulst.writeto(filename, overwrite=True)
+        
 
     def save_source_table(self):
 
@@ -2322,6 +2572,19 @@ def get_ecl_kopal(phase_lst, F0, phase0, R1, R2, inc, u):
 
 def get_kopal_phase14(r1, r2, inc):
     return np.arcsin(np.sqrt((r1 + r2)**2 - np.cos(inc)**2)/np.sin(inc))/np.pi
+
+def get_kopal_phase14_err(r1, r1_err, r2, r2_err, inc, inc_err):
+    f = np.sqrt((r1+r2)**2 - np.cos(inc)**2)/np.sin(inc)
+    df_dr = (r1+r2)/(np.sin(inc)*np.sqrt((r1+r2)**2 - np.cos(inc)**2))
+    df_di = (np.cos(inc)/(np.sin(inc)*np.sqrt((r1+r2)**2 - np.cos(inc)**2))
+            - np.sqrt((r1+r2)**2 - np.cos(inc)**2)*np.cos(inc)/np.sin(inc)**2)
+    dt_dr1 = (1/np.pi) * df_dr / np.sqrt(1-f**2)
+    dt_dr2 = dt_dr1
+    dt_di = (1/np.pi) * df_di / np.sqrt(1-f**2)
+    phase14_err = np.sqrt( (dt_dr1*r1_err)**2
+                         + (dt_dr2*r2_err)**2
+                         + (dt_di*inc_err)**2)
+    return phase14_err
 
 
 def get_ecl_trapz(phase_lst, F0, phase0, depth, ph14, ph23):
