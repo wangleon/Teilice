@@ -172,6 +172,7 @@ class MainWindow(tk.Frame):
         self.period_err = np.nan # period error
         self.t0     = np.nan     # t0
         self.t0_err = np.nan     # t0 error
+        self.secvis = True   # secondary eclips isible?
         self.secphase    = 0.5  # phase of secondary eclipse
         self.secphase_err = np.nan # seondary phase error
         self.priwin       = 0.05 # window of primary eclipse
@@ -180,6 +181,7 @@ class MainWindow(tk.Frame):
         self.secwin_err = np.nan # seondary window error
 
         # model fit info
+        self.autoperiod_info = None
         self.model_info = {
                 'primary': None,
                 'secondary': None,
@@ -358,6 +360,14 @@ class MainWindow(tk.Frame):
         #self.t0 = tmin - int((tmin - all_t_lst[0])/self.period)*self.period
         self.t0 = tmin
 
+    def set_secvis(self, v):
+        self.secvis = v
+        if not self.secvis:
+            self.model_curve['secondary'] = None
+        self.plot_frame.control_panel.update_param()
+        self.plot()
+        self.plot_frame.canvas.draw()
+
     def change_period(self, ratio):
         self.set_period(self.period * ratio)
         # refresh period
@@ -467,14 +477,14 @@ class MainWindow(tk.Frame):
     def fit_period(self, option):
 
         data_lst = self.prepare_parsed_lc()
-        nsep = 20
+        nbins = 20
 
         param = {'npoints': 0, 'nbins': 0}
 
-        def get_var_lst(data_lst, period, ph1, ph2, nsep):
+        def get_var_lst(data_lst, period, ph1, ph2, nbins):
             var_lst = []
-            dphase = (ph2 - ph1) / nsep
-            for i in np.arange(nsep):
+            dphase = (ph2 - ph1) / nbins
+            for i in np.arange(nbins):
                 _ph1 = ph1 + i * dphase
                 _ph2 = _ph1 + dphase
 
@@ -519,7 +529,7 @@ class MainWindow(tk.Frame):
                 var_lst = get_var_lst(data_lst, period,
                             -2*self.priwin,
                             2*self.priwin,
-                            nsep)
+                            nbins)
                 for v in var_lst:
                     all_var_lst.append(v)
                     param['nbins'] += 1
@@ -528,7 +538,7 @@ class MainWindow(tk.Frame):
                 var_lst = get_var_lst(data_lst, period,
                             self.secphase-2*self.secwin,
                             self.secphase+2*self.secwin,
-                            nsep)
+                            nbins)
                 for v in var_lst:
                     all_var_lst.append(v)
                     param['nbins'] += 1
@@ -537,14 +547,14 @@ class MainWindow(tk.Frame):
                 var_lst = get_var_lst(data_lst, period,
                             -2*self.priwin,
                             2*self.priwin,
-                            nsep)
+                            nbins)
                 for v in var_lst:
                     all_var_lst.append(v)
                     param['nbins'] += 1
                 var_lst = get_var_lst(data_lst, period,
                             self.secphase-2*self.secwin,
                             self.secphase+2*self.secwin,
-                            nsep)
+                            nbins)
                 for v in var_lst:
                     all_var_lst.append(v)
                     param['nbins'] += 1
@@ -582,6 +592,8 @@ class MainWindow(tk.Frame):
             new_period = self.period * (1 + newratio)
             new_period_err = self.period * sigma_ratio
 
+
+            self.autoperiod_info = {'option': option, 'nbins': nbins}
             # will trigger plot() function here
             self.set_period(new_period, new_period_err)
 
@@ -1002,7 +1014,7 @@ class MainWindow(tk.Frame):
                     _t = self.t0 + i * self.period
                     ax.axvline(_t, 0, 1, c='r', ls='-',
                             lw=0.5, alpha=0.2, zorder=-1)
-                if self.secphase is not np.nan:
+                if self.secvis and self.secphase is not np.nan:
                     for i in np.arange(i1-1, i2+1):
                         _t = self.t0 + (i + self.secphase) * self.period
                         ax.axvline(_t, 0, 1, c='b', ls='-',
@@ -1086,25 +1098,32 @@ class MainWindow(tk.Frame):
 
         # plot axvlins in axpri
         ylim = axphase.get_ylim()
-        axphase.fill_betweenx(ylim, 1-self.priwin,  1+self.priwin,
+        # plot primary eclipse zone in phase plot
+        axphase.fill_betweenx(ylim, 1-self.priwin, 1+self.priwin,
                 color='r', alpha=0.1, lw=0)
         axphase.fill_betweenx(ylim, 0, self.priwin,
                 color='r', alpha=0.1, lw=0)
         axphase.fill_betweenx(ylim, 2-self.priwin, 2,
                 color='r', alpha=0.1, lw=0)
-        axphase.fill_betweenx(ylim,
-                self.secphase-self.secwin,  self.secphase+self.priwin,
-                color='b', alpha=0.1, lw=0)
-        axphase.fill_betweenx(ylim,
-                1+self.secphase-self.secwin,  1+self.secphase+self.secwin,
-                color='b', alpha=0.1, lw=0)
+        if self.secvis:
+            # plot secondary eclipse zone in phase plot
+            axphase.fill_betweenx(ylim,
+                    self.secphase-self.secwin,  self.secphase+self.priwin,
+                    color='b', alpha=0.1, lw=0)
+            axphase.fill_betweenx(ylim,
+                    1+self.secphase-self.secwin,  1+self.secphase+self.secwin,
+                    color='b', alpha=0.1, lw=0)
+        # plot primary eclipse zone in primary plot
         axpri.axvline(1.0, c='r', ls='-', lw=0.5, alpha=0.1, zorder=-1)
         axpri.fill_betweenx(ylim, 1-self.priwin,  1+self.priwin,
                 color='r', alpha=0.1, lw=0, zorder=-2)
+
+        # plot secondary eclipse zone in secondary plot
         axsec.axvline(self.secphase, c='b', ls='-', lw=0.5, alpha=0.1, zorder=-1)
-        axsec.fill_betweenx(ylim,
-                self.secphase-self.secwin,  self.secphase+self.secwin,
-                color='b', alpha=0.1, lw=0, zorder=-2)
+        if self.secvis:
+            axsec.fill_betweenx(ylim,
+                    self.secphase-self.secwin,  self.secphase+self.secwin,
+                    color='b', alpha=0.1, lw=0, zorder=-2)
         axphase.set_ylim(ylim)
         axpri.set_ylim(ylim)
         axsec.set_ylim(ylim)
@@ -1467,7 +1486,7 @@ class ControlPanel(tk.Frame):
                             text=u'\u2295', width=5, state=tk.DISABLED,
                             command = lambda: self.change_priwin(0.707))
         priwin_label = tk.Label(self, font=label_font, justify='center',
-                                text='Primary Window')
+                                text='Pri. Window')
         self.zoomout_secwin_button = tk.Button(self,
                             text=u'\u2296', width=5, state=tk.DISABLED,
                             command = lambda: self.change_secwin(1.414))
@@ -1475,7 +1494,19 @@ class ControlPanel(tk.Frame):
                             text=u'\u2295', width=5, state=tk.DISABLED,
                             command = lambda: self.change_secwin(0.707))
         secwin_label = tk.Label(self, font=label_font, justify='center',
-                                text='Secondary Window')
+                                text='Sec. Window')
+
+        self.secinvis = tk.BooleanVar(value=False)
+        self.secinvis_cb = tk.Checkbutton(self,
+                            text        ='Invisible',
+                            variable    = self.secinvis,
+                            font        = ('TkDefaultFont', 11),
+                            state       = tk.DISABLED,
+                            command     = lambda: self.on_secinvis(),
+                            onvalue     = True,
+                            offvalue    = False,
+                            )
+
 
         self.detrend_label = tk.Label(self,
                             text='Detrend', font=('TkDefualtFont', 11))
@@ -1561,16 +1592,18 @@ class ControlPanel(tk.Frame):
 
         self.zoomout_priwin_button.grid(row=1, column=icol,
                             sticky='w', padx=5, pady=2)
-        self.zoomin_priwin_button.grid(row=1, column=icol+3,
+        self.zoomin_priwin_button.grid(row=1, column=icol+2,
                             sticky='e', padx=5, pady=2)
         self.zoomout_secwin_button.grid(row=2, column=icol,
                             sticky='w', padx=5, pady=2)
-        self.zoomin_secwin_button.grid(row=2, column=icol+3,
+        self.zoomin_secwin_button.grid(row=2, column=icol+2,
                             sticky='e', padx=5, pady=2)
-        priwin_label.grid(row=1, column=icol+1, columnspan=2,
+        priwin_label.grid(row=1, column=icol+1, columnspan=1,
                             sticky='ew', padx=20, pady=2)
-        secwin_label.grid(row=2, column=icol+1, columnspan=2,
+        secwin_label.grid(row=2, column=icol+1, columnspan=1,
                             sticky='ew', padx=20, pady=2)
+        self.secinvis_cb.grid(row=2, column=icol+3,
+                            sticky='w', padx=5, pady=2)
 
         self.detrend_label.grid(row=3, column=icol,
                             sticky='w', padx=5, pady=2)
@@ -1655,7 +1688,7 @@ class ControlPanel(tk.Frame):
 
         #############################3
         self.apply_button = tk.Button(self,
-                                text  = 'Apply',
+                                text  = 'Apply & Save',
                                 width = 15,
                                 state = tk.DISABLED,
                                 command = self.apply_params,
@@ -1667,6 +1700,8 @@ class ControlPanel(tk.Frame):
 
     def change_period(self, ratio):
         self.master.master.change_period(ratio)
+        # reset autoperiod_info
+        self.master.master.autoperiod_info = None
 
     def change_t0(self, level):
         self.master.master.change_t0(level)
@@ -1715,6 +1750,39 @@ class ControlPanel(tk.Frame):
         model = self.model_sec.get()
         self.master.master.fit_eclipse('secondary', model)
 
+    def on_secinvis(self):
+        if self.secinvis.get():
+            # secondary eclipse invisible
+            self.zoomin_secwin_button['state'] = tk.DISABLED
+            self.zoomout_secwin_button['state'] = tk.DISABLED
+            # secondary phase buttons
+            for key, button in self.add_secphase_buttons.items():
+                button['state'] = tk.DISABLED
+            for key, button in self.sub_secphase_buttons.items():
+                button['state'] = tk.DISABLED
+            # fit secondary eclips buttons
+            self.fitsec_button['state'] = tk.DISABLED
+            for key, rb in self.model_sec_rbs.items():
+                rb['state'] = tk.DISABLED
+
+        else:
+            # secondary eclipse visible
+            self.zoomin_secwin_button['state'] = tk.NORMAL
+            self.zoomout_secwin_button['state'] = tk.NORMAL
+            # secondary phase buttons
+            for key, button in self.add_secphase_buttons.items():
+                button['state'] = tk.NORMAL
+            for key, button in self.sub_secphase_buttons.items():
+                button['state'] = tk.NORMAL
+            # fit secondary eclips buttons
+            self.fitsec_button['state'] = tk.NORMAL
+            for key, rb in self.model_sec_rbs.items():
+                rb['state'] = tk.NORMAL
+
+        v = not self.secinvis.get()
+        # will tirger update_param and replot here
+        self.master.master.set_secvis(v)
+
     def set_button(self, state):
         if state:
 
@@ -1741,6 +1809,8 @@ class ControlPanel(tk.Frame):
             self.zoomout_priwin_button['state'] = tk.NORMAL
             self.zoomin_secwin_button['state'] = tk.NORMAL
             self.zoomout_secwin_button['state'] = tk.NORMAL
+
+            self.secinvis_cb['state'] = tk.NORMAL
 
             self.detrend_spinbox['state'] = tk.NORMAL
             self.fit_ooe_button['state'] = tk.NORMAL
@@ -1794,24 +1864,28 @@ class ControlPanel(tk.Frame):
                     mainwin.t0, mainwin.t0_err)
         self.t0_label.config(text=text)
 
-        if np.isnan(mainwin.secphase_err):
-            text = u'\u03c6 (sec) = {:.5f}'.format(mainwin.secphase)
+        if mainwin.secvis:
+            if np.isnan(mainwin.secphase_err):
+                text = u'\u03c6 (sec) = {:.5f}'.format(mainwin.secphase)
+            else:
+                text = u'\u03c6 (sec) = {:.5f} \xb1 {:5.1e}'.format(
+                        mainwin.secphase, mainwin.secphase_err)
         else:
-            text = u'\u03c6 (sec) = {:.5f} \xb1 {:5.1e}'.format(
-                    mainwin.secphase, mainwin.secphase_err)
+            text = u'\u03c6 (sec)'
         self.secphase_label.config(text=text)
 
         tdur_pri = mainwin.period * mainwin.priwin * 2
         tdur_sec = mainwin.period * mainwin.secwin * 2
-        text1 = '{:.7f}/{:.7f}'.format(tdur_pri, tdur_sec)
-
+        text1 = '{}/{}'.format(
+                    '{:.7f}'.format(tdur_pri),
+                    '{:.7f}'.format(tdur_sec) if mainwin.secvis else '--')
         
         if ~np.isnan(mainwin.priwin_err) or ~np.isnan(mainwin.secwin_err):
             text2 = '{}/{}'.format(
                         '{:5.1e}'.format(mainwin.period * mainwin.priwin_err * 2)
                             if ~np.isnan(mainwin.priwin_err) else 'nan',
                         '{:5.1e}'.format(mainwin.period * mainwin.secwin_err * 2)
-                            if ~np.isnan(mainwin.secwin_err) else 'nan'
+                            if mainwin.secvis and ~np.isnan(mainwin.secwin_err) else 'nan'
                         )
             text = 'Tdur = {} \xb1 {} d'.format(text1, text2)
         else:
@@ -1966,6 +2040,8 @@ class SourceFrame(tk.Frame):
                 height  = 20,
                 selectmode = 'browse',
                 )
+        self.source_tree.tag_configure('exist', background='#fef0b0')
+
 
         self.source_tree.bind('<<TreeviewSelect>>', self.on_select_item)
 
@@ -2013,15 +2089,29 @@ class SourceFrame(tk.Frame):
                     tag_lst.append(flag.upper())
             notes = ', '.join(tag_lst)
 
+
+            # check file exist
+            file_exists = False
+            for fname in os.listdir(self.master.master.folded_path):
+                mobj = re.match('foldedlc\-(\d+)_s(\d+)_s(\d+)\.fits', fname)
+                if mobj:
+                    if tic == int(mobj.group(1)):
+                        file_exists=True
+                        break
+            if file_exists:
+                tag = 'exist'
+            else:
+                tag = 'normal'
             item = (tic, period, phi_sec, subtype, notes)
             iid = self.source_tree.insert('', tk.END,
-                        values=item, tags='normal', open=True)
+                        values=item, tags=tag, open=True)
 
         self.save_button.pack(side=tk.TOP)
         self.source_tree.pack(side=tk.LEFT, fill=tk.Y, expand=True)
         self.scrollbar.pack(side=tk.LEFT, fill=tk.Y)
 
         self.pack()
+
 
     def on_select_item(self, event):
 
@@ -2137,7 +2227,7 @@ class SourceFrame(tk.Frame):
         newvalues[4] = ', '.join(tag_lst)
         
         # display the new values in the source table
-        self.source_tree.item(item, values=newvalues)
+        self.source_tree.item(item, values=newvalues, tags='exist')
 
         # Step 2. pass the new parameters to he source table
         m = self.source_table['TIC']==tic
@@ -2238,6 +2328,12 @@ class SourceFrame(tk.Frame):
             head.append(('PERIOD_E', -1))
         else:
             head.append(('PERIOD_E', mainwin.period_err))
+        if mainwin.autoperiod_info is not None:
+            head.append(('PER_MET', 'auto'))
+            head.append(('PER_OPT', mainwin.autoperiod_info['option']))
+            head.append(('PER_NBIN', mainwin.autoperiod_info['nbins']))
+        else:
+            head.append(('PER_MET', 'manual'))
         if np.isnan(mainwin.t0):
             head.append(('T0', -1))
         else:
@@ -2329,7 +2425,7 @@ class SourceFrame(tk.Frame):
                 subhead.append(('MASK{:03d}1'.format(i), t1))
                 subhead.append(('MASK{:03d}2'.format(i), t2))
 
-            if s in mainwin.lc_trends:
+            if mainwin.lc_trends is not None and s in mainwin.lc_trends:
                 trendf = mainwin.lc_trends[s]
             else:
                 trendf = np.zeros_like(t_lst)
