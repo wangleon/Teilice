@@ -36,36 +36,34 @@ from ..periodogram import GLS
 def consecutive(data):
     return np.split(data, np.where(np.diff(data) != 1)[0]+1)
 
-def get_lc(tic, sector_lst, datapool):
-    lc_lst = {}
-    for sector in sector_lst:
-        path = os.path.join(datapool, 'lc', 's{:03d}'.format(sector))
 
-        # get lc file
-        find = False
-        for fname in os.listdir(path):
-            _tic = int(fname.split('-')[2])
-            if _tic == tic:
-                find = True
-                break
-        if not find:
-            print('Error: TIC {} file does not exist in Sector {}'.format(tic, sector))
-            raise ValueError
+def get_lc(tic, sector, datapool):
+    path = os.path.join(datapool, 'lc', 's{:03d}'.format(sector))
 
-        lc_filename = os.path.join(path, fname)
-        table = fits.getdata(lc_filename)
-        t_lst = table['TIME']
-        f_lst = table['PDCSAP_FLUX']
-        q_lst = table['QUALITY']
-        m = q_lst==0
-        t_lst = t_lst[m]
-        f_lst = f_lst[m]
-        # filter NaN values
-        m2 = ~np.isnan(f_lst)
-        t_lst = t_lst[m2]
-        f_lst = f_lst[m2]
-        lc_lst[sector] = (t_lst, f_lst)
-    return lc_lst
+    # get lc file
+    find = False
+    for fname in os.listdir(path):
+        _tic = int(fname.split('-')[2])
+        if _tic == tic:
+            find = True
+            break
+    if not find:
+        print('Error: TIC {} file does not exist in Sector {}'.format(tic, sector))
+        raise ValueError
+
+    lc_filename = os.path.join(path, fname)
+    table = fits.getdata(lc_filename)
+    t_lst = table['TIME']
+    f_lst = table['PDCSAP_FLUX']
+    q_lst = table['QUALITY']
+    m = q_lst==0
+    t_lst = t_lst[m]
+    f_lst = f_lst[m]
+    # filter NaN values
+    m2 = ~np.isnan(f_lst)
+    t_lst = t_lst[m2]
+    f_lst = f_lst[m2]
+    return t_lst, f_lst
 
 def get_cont_lst(t_lst, tol):
     cont_lst = []
@@ -77,8 +75,6 @@ def get_cont_lst(t_lst, tol):
         t2 = t_lst[i2]
         cont_lst.append((t1, t2))
     return cont_lst
-
-
 
 class MainWindow(tk.Frame):
 
@@ -137,7 +133,7 @@ class MainWindow(tk.Frame):
         #self.plot_frame.control_panel.correct_offset.set(self.correct_offset)
 
         self.sector_lst = [] # sector list
-        self.sector_mask = [] # mask for displaying sectors
+        self.sector_mask = {} # mask for displaying sectors
         self.lc_lst = {}
         # median flux of each sector
         self.medflux_lst = {}
@@ -189,12 +185,24 @@ class MainWindow(tk.Frame):
 
         self.source_changed = False
 
+    def check_folded_exists(self, tic):
+
+        file_path = None
+        for fname in os.listdir(self.folded_path):
+            mobj = re.match('foldedlc\-(\d+)_s(\d+)_s(\d+)\.fits', fname)
+            if mobj:
+                if int(mobj.group(1)) == tic:
+                    file_path = os.path.join(self.folded_path, fname)
+                    break
+        return file_path
+
 
     def read_lc(self):
 
         self.sector_lst = get_lc_sectors(self.tic)
         self.sector_mask = {s: True for s in self.sector_lst}
-        self.lc_lst = get_lc(self.tic, self.sector_lst, self.datapool)
+        self.lc_lst = {s: get_lc(self.tic, s, self.datapool)
+                            for s in self.sector_lst}
 
         # initialize tspan_lst
         self.tspan_lst = {s: (t_lst[0], t_lst[-1])
@@ -217,6 +225,176 @@ class MainWindow(tk.Frame):
         for iseg, segs in enumerate(self.segment_lst):
             for sector in segs:
                 self.argseg_lst[sector] = iseg
+
+        # find sector-by-sector offsets
+        self.find_offset()
+        # prepare the segmented light curves
+        self.get_seg_lc()
+        # calculate GLS periodogram of each segment
+        self.calc_gls()
+
+    def read_fits(self, file_path):
+        hdulst = fits.open(file_path)
+        head = hdulst[0].header
+
+        self.tic = head['TIC']
+        self.correct_offset = head['COR_OFF']
+        self.medflux = head['MEDFLUX']
+        self.detrendwin = head['DTR_WIN']
+
+        # read period
+        if head['PERIOD'] > 0:
+            self.period = head['PERIOD']
+        if head['PERIOD_E'] > 0:
+            self.period_err = head['PERIOD_E']
+        if head['PER_MET']=='auto':
+            self.autoperiod_info = {
+                    'option': head['PER_OPT'],
+                    'nbins':  head['PER_NBIN'],
+                    }
+        # read T0
+        if head['T0'] > 0:
+            self.t0 = head['T0']
+        if head['T0_E'] > 0:
+            self.t0_err = head['T0_E']
+
+        # whether secondary eclipse is visible
+        self.secvis = head['SECVIS']
+
+        # read phase of secondary phase
+        if self.secvis and head['SECPH'] > 0:
+            self.secphase = head['SECPH']
+        if self.secvis and head['SECPH_E'] > 0:
+            self.secphase_err = head['SECPH_E']
+
+        # read primary window length
+        if head['PRIWIN'] > 0:
+            self.priwin = head['PRIWIN']
+        if head['PRIWIN_E'] > 0:
+            self.priwin_err = head['PRIWIN_E']
+
+        # read secondary window length
+        if self.secvis and head['SECWIN'] > 0:
+            self.secwin = head['SECWIN']
+        if self.secvis and head['SECWIN_E'] > 0:
+            self.secwin_err = head['SECWIN_E']
+
+        # set subtype (contact/detached)
+        control_panel = self.plot_frame.control_panel
+        control_panel.subtype.set(head['SUBTYPE'])
+
+        # set flags
+        for flag, _ in control_panel.flags.items():
+            key = 'FLAG_'+flag.upper()
+            if head[key]:
+                control_panel.flag_cbs[flag].select()
+
+        # read primary eclispe parameters
+        for ecl, prefix in [('primary', 'PR'), ('secondary', 'SE')]:
+            if prefix+'MODEL' in head:
+                name = head[prefix+'MODEL']
+                if name == 'kopal':
+                    self.model_info[ecl] = {
+                        'name':         'kopal',
+                        'phase0':       head[prefix+'PH0'],
+                        'phase0_err':   head[prefix+'PH0_E'],
+                        'f0':           head[prefix+'F0'],
+                        'f0_err':       head[prefix+'F0_E'],
+                        'r1':           head[prefix+'R1'],
+                        'r1_err':       head[prefix+'R1_E'],
+                        'r2':           head[prefix+'R2'],
+                        'r2_err':       head[prefix+'R2_E'],
+                        'inc':          head[prefix+'INC'],
+                        'inc_err':      head[prefix+'INC_E'],
+                        'u':            head[prefix+'U'],
+                        'u_err':        head[prefix+'U_E'],
+                        'depth':        head[prefix+'DEP'],
+                        'depth_err':    head[prefix+'DEP_E'],
+                        'phase14':      head[prefix+'PH14'],
+                        'phase14_err':  head[prefix+'PH14_E'],
+                        }
+                elif name == 'trapz':
+                    self.model_info[ecl] = {
+                        'name':         'trapz',
+                        'phase0':       head[prefix+'PH0'],
+                        'phase0_err':   head[prefix+'PH0_E'],
+                        'f0':           head[prefix+'F0'],
+                        'f0_err':       head[prefix+'F0_E'],
+                        'depth':        head[prefix+'DEP'],
+                        'depth_err':    head[prefix+'DEP_E'],
+                        'phase14':      head[prefix+'PH14'],
+                        'phase14_err':  head[prefix+'PH14_E'],
+                        'phase23':      head[prefix+'PH23'],
+                        'phase23_err':  head[prefix+'PH23_E'],
+                        }
+                else:
+                    # fitting model is not kopal or trapz
+                    raise ValueError
+
+        self.lc_trends = {}
+        for hdu in hdulst[1:]:
+            subhead = hdu.header
+            tab     = hdu.data
+            s       = subhead['SECTOR']
+            use     = subhead['USE']
+            offset  = subhead['OFFSET']
+
+            self.sector_lst.append(s)
+            self.sector_mask[s] = use
+            t_lst  = tab['TIME']
+            f_lst  = tab['PDCSAP_FLUX']
+            trendf = tab['OOE_FLUX']
+            self.lc_lst[s] = (t_lst, f_lst)
+
+            # read lc_mask
+            self.lc_mask[s] = []
+            for item in subhead.items():
+                mobj = re.match(r'^MASK(\d{3})1$', item[0])
+                if mobj:
+                    t1 = item[1]
+                    number = mobj.group(1)
+                    key = 'MASK{}2'.format(number)
+                    t2 = subhead[key]
+                    self.lc_mask[s].append((t1, t2))
+
+            self.lc_trends[s] = trendf
+
+
+        hdulst.close()
+
+        # read additional sectors that not in saved FITS
+        for s in get_lc_sectors(self.tic):
+            if s not in self.lc_lst:
+                self.sector_lst.append(s)
+                self.lc_lst[s] = get_lc(self,tic, s, self.datapool)
+        # resort sector list
+        self.sector_lst.sort()
+
+        # update tspan_lst
+        self.tspan_lst = {s: (t_lst[0], t_lst[-1])
+                        for s, (t_lst, f_lst) in self.lc_lst.items()}
+
+        self.find_tlength()  # this will update the self.tlength_lst
+
+        # find median flux of each sector
+        self.medflux_lst = {s: np.median(f_lst)
+                            for s, (t_lst, f_lst) in self.lc_lst.items()
+                            }
+
+        # generate segments
+        self.segment_lst = consecutive(self.sector_lst)
+
+        # determine each segment belong to which segment
+        for iseg, segs in enumerate(self.segment_lst):
+            for sector in segs:
+                self.argseg_lst[sector] = iseg
+
+        # find sector-by-sector offsets
+        self.find_offset()
+        # prepare the segmented light curves
+        self.get_seg_lc()
+        # calculate GLS periodogram of each segment
+        self.calc_gls()
 
     def get_effective_lc(self, sector):
         """get effective t_lst of a give sector"""
@@ -764,11 +942,13 @@ class MainWindow(tk.Frame):
                         'depth': depth, 'depth_err': depth_err,
                         'phase14': phase14, 'phase14_err': phase14_err,
                         }
-
                 self.model_curve[eclipse] = (newph_lst, newf_lst)
-                self.plot_frame.control_panel.update_param()
-                self.plot()
-                self.plot_frame.canvas.draw()
+
+            else:
+                # if fitting is not successful
+                self.model_info[eclipse] = None
+                self.model_curve[eclipse] = None
+
         elif model == 'trapz':
             fbase = np.percentile(allflux_lst, 10)
             depth0 = 1-fbase/f0
@@ -831,10 +1011,20 @@ class MainWindow(tk.Frame):
                         'phase23': phase23, 'phase23_err': phase23_err,
                         'depth': depth, 'depth_err': depth_err,
                         }
+            else:
+                # if fitting is not successful
+                self.model_curve[eclipse] = None
+                self.model_info[eclipse] = None
 
-                self.plot_frame.control_panel.update_param()
-                self.plot()
-                self.plot_frame.canvas.draw()
+        else:
+            # fitting model is not kopal or trapz
+            raise ValueError
+
+
+        # finally, refresh the control panel and replot
+        self.plot_frame.control_panel.update_param()
+        self.plot()
+        self.plot_frame.canvas.draw()
 
 
     def plot(self):
@@ -2091,17 +2281,11 @@ class SourceFrame(tk.Frame):
 
 
             # check file exist
-            file_exists = False
-            for fname in os.listdir(self.master.master.folded_path):
-                mobj = re.match('foldedlc\-(\d+)_s(\d+)_s(\d+)\.fits', fname)
-                if mobj:
-                    if tic == int(mobj.group(1)):
-                        file_exists=True
-                        break
-            if file_exists:
+            if self.master.master.check_folded_exists(tic):
                 tag = 'exist'
             else:
                 tag = 'normal'
+
             item = (tic, period, phi_sec, subtype, notes)
             iid = self.source_tree.insert('', tk.END,
                         values=item, tags=tag, open=True)
@@ -2133,55 +2317,59 @@ class SourceFrame(tk.Frame):
         mainwin = self.master.master
         control_panel = mainwin.plot_frame.control_panel
 
-        mainwin.tic = tic
-        if row['Period'] is not np.ma.masked:
-            mainwin.period = row['Period']
-            if row['tdur_pri'] is not np.ma.masked:
-                mainwin.priwin = row['tdur_pri']/2/row['Period']
-            if row['tdur_sec'] is not np.ma.masked:
-                mainwin.secwin = row['tdur_sec']/2/row['Period']
-        if row['T0'] is not np.ma.masked:
-            mainwin.t0 = row['T0']
-        if row['phi_sec'] is not np.ma.masked:
-            mainwin.secphase = row['phi_sec']
-
-
-        # read light curves
-        mainwin.read_lc()
-
-        # put sector list into the sector tree
-        self.master.sector_frame.load_sectors(mainwin.sector_lst)
-
-        # find sector-by-sector offsets
-        mainwin.find_offset()
-        # prepare the segmented light curves
-        mainwin.get_seg_lc()
-        # calculate GLS periodogram of each segment
-        mainwin.calc_gls()
-
-        if np.isnan(mainwin.period):
-            mainwin.find_period_auto()
-        if np.isnan(mainwin.t0):
-            mainwin.find_t0_auto()
-
-
-        mainwin.plot()
-        mainwin.plot_frame.canvas.draw()
-
+        # reset control_panel
         control_panel.reset_param()
         control_panel.set_button(True)
+
+        file_path = mainwin.check_folded_exists(tic)
+        if file_path:
+            # folded fits file already exists
+            mainwin.read_fits(file_path)
+
+            # put sector list into the sector tree
+            self.master.sector_frame.load_sectors(mainwin.sector_lst)
+
+        else:
+            mainwin.tic = tic
+            if row['Period'] is not np.ma.masked:
+                mainwin.period = row['Period']
+                if row['tdur_pri'] is not np.ma.masked:
+                    mainwin.priwin = row['tdur_pri']/2/row['Period']
+                if row['tdur_sec'] is not np.ma.masked:
+                    mainwin.secwin = row['tdur_sec']/2/row['Period']
+            if row['T0'] is not np.ma.masked:
+                mainwin.t0 = row['T0']
+            if row['phi_sec'] is not np.ma.masked:
+                mainwin.secphase = row['phi_sec']
+            
+            
+            # read light curves
+            mainwin.read_lc()
+            
+            # put sector list into the sector tree
+            self.master.sector_frame.load_sectors(mainwin.sector_lst)
+            
+
+            if np.isnan(mainwin.period):
+                mainwin.find_period_auto()
+            if np.isnan(mainwin.t0):
+                mainwin.find_t0_auto()
+
+            # check the source table, and set the subtypes
+            if row['subtype'] is not np.ma.masked \
+                and row['subtype'] in control_panel.subtype_rbs:
+                control_panel.subtype.set(row['subtype'])
+            
+            # check the source table, and toggle the flag check buttons
+            for flag, var in control_panel.flags.items():
+                if row[flag] is not np.ma.masked and row[flag]==1:
+                    control_panel.flag_cbs[flag].select()
+
         # refresh parameters in the control panel
         control_panel.update_param()
 
-        # check the source table, and set the subtypes
-        if row['subtype'] is not np.ma.masked \
-            and row['subtype'] in control_panel.subtype_rbs:
-            control_panel.subtype.set(row['subtype'])
-
-        # check the source table, and toggle the flag check buttons
-        for flag, var in control_panel.flags.items():
-            if row[flag] is not np.ma.masked and row[flag]==1:
-                control_panel.flag_cbs[flag].select()
+        mainwin.plot()
+        mainwin.plot_frame.canvas.draw()
 
 
     def apply_params(self):
@@ -2229,7 +2417,7 @@ class SourceFrame(tk.Frame):
         # display the new values in the source table
         self.source_tree.item(item, values=newvalues, tags='exist')
 
-        # Step 2. pass the new parameters to he source table
+        # Step 2. pass the new parameters to the source table
         m = self.source_table['TIC']==tic
         idx = np.nonzero(m)[0]
 
@@ -2316,108 +2504,158 @@ class SourceFrame(tk.Frame):
 
         # save folded light curve
         head = fits.Header()
+        # tic number
         head.append(('TIC', mainwin.tic))
+        # save correct offset flag
         head.append(('COR_OFF', mainwin.correct_offset))
+        # save median flux
         head.append(('MEDFLUX', mainwin.medflux))
+        # save detrend window
         head.append(('DTR_WIN', mainwin.detrendwin))
+        # save period
         if np.isnan(mainwin.period):
             head.append(('PERIOD', -1))
         else:
             head.append(('PERIOD', mainwin.period))
+
+        # save uncertainty of period
         if np.isnan(mainwin.period_err):
             head.append(('PERIOD_E', -1))
         else:
             head.append(('PERIOD_E', mainwin.period_err))
+
         if mainwin.autoperiod_info is not None:
             head.append(('PER_MET', 'auto'))
             head.append(('PER_OPT', mainwin.autoperiod_info['option']))
             head.append(('PER_NBIN', mainwin.autoperiod_info['nbins']))
         else:
             head.append(('PER_MET', 'manual'))
+
+        # save t0
         if np.isnan(mainwin.t0):
             head.append(('T0', -1))
         else:
             head.append(('T0', mainwin.t0))
+
+        # save uncertainty of t0
         if np.isnan(mainwin.t0_err):
             head.append(('T0_E', -1))
         else:
             head.append(('T0_E', mainwin.t0_err))
-        if np.isnan(mainwin.secphase):
+
+        # save whether secondary eclipse is visible
+        head.append(('SECVIS', mainwin.secvis))
+
+        # save phase of secondary eclipse
+        if not mainwin.secvis or np.isnan(mainwin.secphase):
             head.append(('SECPH', -1))
         else:
             head.append(('SECPH', mainwin.secphase))
-        if np.isnan(mainwin.secphase_err):
+
+        # save uncertainty of phase of secondary eclipse
+        if not mainwin.secvis or np.isnan(mainwin.secphase_err):
             head.append(('SECPH_E', -1))
         else:
             head.append(('SECPH_E', mainwin.secphase_err))
+
+        # save primary window length
         if np.isnan(mainwin.priwin):
             head.append(('PRIWIN', -1))
         else:
-            head.append(('RPIWIN', mainwin.priwin))
+            head.append(('PRIWIN', mainwin.priwin))
+
+        # save uncertainty of primary window length
         if np.isnan(mainwin.priwin_err):
             head.append(('PRIWIN_E', -1))
         else:
-            head.append(('RPIWIN_E', mainwin.priwin_err))
-        if np.isnan(mainwin.secwin):
+            head.append(('PRIWIN_E', mainwin.priwin_err))
+
+        # save secondary window length
+        if not mainwin.secvis or np.isnan(mainwin.secwin):
             head.append(('SECWIN', -1))
         else:
             head.append(('SECWIN', mainwin.secwin))
-        if np.isnan(mainwin.secwin_err):
+
+        # save uncertainty of secondary window length
+        if not mainwin.secvis or np.isnan(mainwin.secwin_err):
             head.append(('SECWIN_E', -1))
         else:
             head.append(('SECWIN_E', mainwin.secwin_err))
 
         control_panel = mainwin.plot_frame.control_panel
 
+        # save subtype (contact/detached)
         subtype = control_panel.subtype.get()
         head.append(('SUBTYPE', subtype))
+
+        # save flags
         for flag, var in control_panel.flags.items():
             if var.get():
                 head.append(('FLAG_'+flag.upper(), True))
             else:
                 head.append(('FLAG_'+flag.upper(), False))
 
-        for ecl in ['primary', 'secondary']:
+        # save model parameters of primary and secondary eclipses
+        if mainwin.secvis:
+            ecl_lst = ['primary', 'secondary']
+        else:
+            # if secondary eclipse is invisible, only save pirmary parameters
+            ecl_lst = ['primary']
+
+
+        for ecl in ecl_lst:
             model = mainwin.model_info[ecl]
-            if model is not None:
-                name = model['name']
-                head.append(('PRIMODEL', name))
-                if name == 'kopal':
-                    head.append(('PH0',    model['phase0']))
-                    head.append(('PH0_E',  model['phase0_err']))
-                    head.append(('F0',     model['f0']))
-                    head.append(('F0_E',   model['f0_err']))
-                    head.append(('R1',     model['r1']))
-                    head.append(('R1_E',   model['r1_err']))
-                    head.append(('R2',     model['r2']))
-                    head.append(('R2_E',   model['r2_err']))
-                    head.append(('INC',    model['inc']))
-                    head.append(('INC_E',  model['inc_err']))
-                    head.append(('U',      model['u']))
-                    head.append(('U_E',    model['u_err']))
-                    head.append(('DEP',    model['depth']))
-                    head.append(('DEP_E',  model['depth_err']))
-                    head.append(('PH14',   model['phase14']))
-                    head.append(('PH14_E', model['phase14_err']))
-                elif name == 'trapz':
-                    head.append(('PH0',    model['phase0']))
-                    head.append(('PH0_E',  model['phase0_err']))
-                    head.append(('F0',     model['f0']))
-                    head.append(('F0_E',   model['f0_err']))
-                    head.append(('DEP',    model['depth']))
-                    head.append(('DEP_E',  model['depth_err']))
-                    head.append(('PH14',   model['phase14']))
-                    head.append(('PH14_E', model['phase14_err']))
-                    head.append(('PH23',   model['phase23']))
-                    head.append(('PH23_E', model['phase23_err']))
+            if model is None:
+                # skip if no model fitting
+                continue
+
+            # prefix is either "PR" or "SE"
+            prefix = ecl[0:2].upper()
+
+            name = model['name']
+            head.append((prefix+'MODEL', name))
+            if name == 'kopal':
+                head.append((prefix+'PH0',    model['phase0']))
+                head.append((prefix+'PH0_E',  model['phase0_err']))
+                head.append((prefix+'F0',     model['f0']))
+                head.append((prefix+'F0_E',   model['f0_err']))
+                head.append((prefix+'R1',     model['r1']))
+                head.append((prefix+'R1_E',   model['r1_err']))
+                head.append((prefix+'R2',     model['r2']))
+                head.append((prefix+'R2_E',   model['r2_err']))
+                head.append((prefix+'INC',    model['inc']))
+                head.append((prefix+'INC_E',  model['inc_err']))
+                head.append((prefix+'U',      model['u']))
+                head.append((prefix+'U_E',    model['u_err']))
+                head.append((prefix+'DEP',    model['depth']))
+                head.append((prefix+'DEP_E',  model['depth_err']))
+                head.append((prefix+'PH14',   model['phase14']))
+                head.append((prefix+'PH14_E', model['phase14_err']))
+            elif name == 'trapz':
+                head.append((prefix+'PH0',    model['phase0']))
+                head.append((prefix+'PH0_E',  model['phase0_err']))
+                head.append((prefix+'F0',     model['f0']))
+                head.append((prefix+'F0_E',   model['f0_err']))
+                head.append((prefix+'DEP',    model['depth']))
+                head.append((prefix+'DEP_E',  model['depth_err']))
+                head.append((prefix+'PH14',   model['phase14']))
+                head.append((prefix+'PH14_E', model['phase14_err']))
+                head.append((prefix+'PH23',   model['phase23']))
+                head.append((prefix+'PH23_E', model['phase23_err']))
+            else:
+                raise ValueError
 
         hdulst = fits.HDUList([
                     fits.PrimaryHDU(header=head)
                 ])
 
+        # save parsed lc in extended HDUs
         for s, (t_lst, f_lst) in sorted(mainwin.lc_lst.items()):
             subhead = fits.Header()
             subhead.append(('SECTOR', s))
+            # save whether this sector is displayed
+            subhead.append(('USE', mainwin.sector_mask[s]))
+            # save offset
             subhead.append(('OFFSET', mainwin.offset_lst[s]))
 
             mask_lst = mainwin.lc_mask[s]
@@ -2429,11 +2667,11 @@ class SourceFrame(tk.Frame):
                 trendf = mainwin.lc_trends[s]
             else:
                 trendf = np.zeros_like(t_lst)
-            t = Table()
-            t.add_column(t_lst, name='TIME')
-            t.add_column(f_lst, name='PDCSAP_FLUX')
-            t.add_column(trendf, name='OOE_FLUX')
-            hdulst.append(fits.BinTableHDU(data=t, header=subhead))
+            tab = Table()
+            tab.add_column(t_lst, name='TIME')
+            tab.add_column(f_lst, name='PDCSAP_FLUX')
+            tab.add_column(trendf, name='OOE_FLUX')
+            hdulst.append(fits.BinTableHDU(data=tab, header=subhead))
 
         hdulst.writeto(filename, overwrite=True)
         
