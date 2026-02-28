@@ -234,6 +234,9 @@ class MainWindow(tk.Frame):
         self.calc_gls()
 
     def read_fits(self, file_path):
+        # set alias
+        control_panel = self.plot_frame.control_panel
+
         hdulst = fits.open(file_path)
         head = hdulst[0].header
 
@@ -248,10 +251,16 @@ class MainWindow(tk.Frame):
         if head['PERIOD_E'] > 0:
             self.period_err = head['PERIOD_E']
         if head['PER_MET']=='auto':
+            option = head['PER_OPT']
+            nbins  = head['PER_NBIN']
+
             self.autoperiod_info = {
-                    'option': head['PER_OPT'],
-                    'nbins':  head['PER_NBIN'],
+                    'option': option,
+                    'nbins':  nbins,
                     }
+            # set autoperiod option (primary/secondary/both)
+            control_panel.autoperiod_options.set(option)
+
         # read T0
         if head['T0'] > 0:
             self.t0 = head['T0']
@@ -260,6 +269,7 @@ class MainWindow(tk.Frame):
 
         # whether secondary eclipse is visible
         self.secvis = head['SECVIS']
+        control_panel.secinvis.set(not self.secvis)
 
         # read phase of secondary phase
         if self.secvis and head['SECPH'] > 0:
@@ -280,7 +290,6 @@ class MainWindow(tk.Frame):
             self.secwin_err = head['SECWIN_E']
 
         # set subtype (contact/detached)
-        control_panel = self.plot_frame.control_panel
         control_panel.subtype.set(head['SUBTYPE'])
 
         # set flags
@@ -294,39 +303,108 @@ class MainWindow(tk.Frame):
             if prefix+'MODEL' in head:
                 name = head[prefix+'MODEL']
                 if name == 'kopal':
+                    phase0      = head[prefix+'PH0']
+                    phase0_err  = head[prefix+'PH0_E']
+                    f0          = head[prefix+'F0']
+                    f0_err      = head[prefix+'F0_E']
+                    r1          = head[prefix+'R1']
+                    r1_err      = head[prefix+'R1_E']
+                    r2          = head[prefix+'R2']
+                    r2_err      = head[prefix+'R2_E']
+                    inc         = head[prefix+'INC']
+                    inc_err     = head[prefix+'INC_E']
+                    u           = head[prefix+'U']
+                    u_err       = head[prefix+'U_E']
+                    depth       = head[prefix+'DEP']
+                    depth_err   = head[prefix+'DEP_E']
+                    phase14     = head[prefix+'PH14']
+                    phase14_err = head[prefix+'PH14_E']
+
                     self.model_info[ecl] = {
                         'name':         'kopal',
-                        'phase0':       head[prefix+'PH0'],
-                        'phase0_err':   head[prefix+'PH0_E'],
-                        'f0':           head[prefix+'F0'],
-                        'f0_err':       head[prefix+'F0_E'],
-                        'r1':           head[prefix+'R1'],
-                        'r1_err':       head[prefix+'R1_E'],
-                        'r2':           head[prefix+'R2'],
-                        'r2_err':       head[prefix+'R2_E'],
-                        'inc':          head[prefix+'INC'],
-                        'inc_err':      head[prefix+'INC_E'],
-                        'u':            head[prefix+'U'],
-                        'u_err':        head[prefix+'U_E'],
-                        'depth':        head[prefix+'DEP'],
-                        'depth_err':    head[prefix+'DEP_E'],
-                        'phase14':      head[prefix+'PH14'],
-                        'phase14_err':  head[prefix+'PH14_E'],
+                        'phase0':       phase0,
+                        'phase0_err':   phase0_err,
+                        'f0':           f0,
+                        'f0_err':       f0_err,
+                        'r1':           r1,
+                        'r1_err':       r1_err,
+                        'r2':           r2,
+                        'r2_err':       r2_err,
+                        'inc':          inc,
+                        'inc_err':      inc_err,
+                        'u':            u,
+                        'u_err':        u_err,
+                        'depth':        depth,
+                        'depth_err':    depth_err,
+                        'phase14':      phase14,
+                        'phase14_err':  phase14_err,
                         }
+
+                    # generate model curve
+                    if ecl == 'primary':
+                        ph1 = 1.0 - 2*self.priwin
+                        ph2 = 1.0 + 2*self.priwin
+                        nph = 400
+                        newph_lst = np.linspace(ph1, ph2, nph)
+                        newf_lst = get_ecl_kopal(newph_lst, f0, 0.0, r1, r2, np.deg2rad(inc), u)
+                        control_panel.model_pri.set('kopal')
+                    elif ecl == 'secondary':
+                        ph1 = self.secphase - 2*self.secwin
+                        ph2 = self.secphase + 2*self.secwin
+                        nph = 400
+                        newph_lst = np.linspace(ph1, ph2, nph)
+                        newf_lst = get_ecl_kopal(newph_lst, f0, self.secphase, r1, r2, np.deg2rad(inc), u)
+                        control_panel.model_sec.set('kopal')
+                    else:
+                        raise ValueError
+
+                    self.model_curve[ecl] = (newph_lst, newf_lst)
+
                 elif name == 'trapz':
+                    phase0      = head[prefix+'PH0']
+                    phase0_err  = head[prefix+'PH0_E']
+                    f0          = head[prefix+'F0']
+                    f0_err      = head[prefix+'F0_E']
+                    depth       = head[prefix+'DEP']
+                    depth_err   = head[prefix+'DEP_E']
+                    phase14     = head[prefix+'PH14']
+                    phase14_err = head[prefix+'PH14_E']
+                    phase23     = head[prefix+'PH23']
+                    phase23_err = head[prefix+'PH23_E']
+
                     self.model_info[ecl] = {
                         'name':         'trapz',
-                        'phase0':       head[prefix+'PH0'],
-                        'phase0_err':   head[prefix+'PH0_E'],
-                        'f0':           head[prefix+'F0'],
-                        'f0_err':       head[prefix+'F0_E'],
-                        'depth':        head[prefix+'DEP'],
-                        'depth_err':    head[prefix+'DEP_E'],
-                        'phase14':      head[prefix+'PH14'],
-                        'phase14_err':  head[prefix+'PH14_E'],
-                        'phase23':      head[prefix+'PH23'],
-                        'phase23_err':  head[prefix+'PH23_E'],
+                        'phase0':       phase0,
+                        'phase0_err':   phase0_err,
+                        'f0':           f0,
+                        'f0_err':       f0_err,
+                        'depth':        depth,
+                        'depth_err':    depth_err,
+                        'phase14':      phase14,
+                        'phase14_err':  phase14_err,
+                        'phase23':      phase23,
+                        'phase23_err':  phase23_err,
                         }
+
+                    # generate model curve
+                    if ecl == 'primary':
+                        ph1 = -2*self.priwin
+                        ph2 = +2*self.priwin
+                        nph = 400
+                        newph_lst = np.linspace(ph1, ph2, nph)
+                        newf_lst = get_ecl_trapz(newph_lst, f0, 0.0, depth, phase14, phase23)
+                        self.model_curve[ecl] = (newph_lst+1, newf_lst)
+                        control_panel.model_pri.set('trapz')
+                    elif ecl == 'secondary':
+                        ph1 = self.secphase - 2*self.secwin
+                        ph2 = self.secphase + 2*self.secwin
+                        nph = 400
+                        newph_lst = np.linspace(ph1, ph2, nph)
+                        newf_lst = get_ecl_trapz(newph_lst, f0, self.secphase, depth, phase14, phase23)
+                        self.model_curve[ecl] = (newph_lst, newf_lst)
+                        control_panel.model_sec.set('trapz')
+                    else:
+                        raise ValueError
                 else:
                     # fitting model is not kopal or trapz
                     raise ValueError
@@ -357,7 +435,13 @@ class MainWindow(tk.Frame):
                     t2 = subhead[key]
                     self.lc_mask[s].append((t1, t2))
 
-            self.lc_trends[s] = trendf
+            if (trendf > 1e-6).sum()>10:
+                self.lc_trends[s] = trendf
+
+        # reset lc_trends if no trends
+        if len(self.lc_trends)==0:
+            self.lc_trends = None
+
 
 
         hdulst.close()
@@ -627,18 +711,23 @@ class MainWindow(tk.Frame):
                 t2 = t_lst[-1]
                 i1 = int((t1-self.t0)/self.period)
                 i2 = int((t2-self.t0)/self.period)
+
+                # block points near primary window
                 for i in np.arange(i1, i2+1):
                     _tc = self.t0 + i * self.period
                     _t1 = _tc - self.priwin * self.period
                     _t2 = _tc + self.priwin * self.period
                     _m = (t_lst > _t1)*(t_lst < _t2)
                     mask[_m] = False
-                for i in np.arange(i1-1, i2+1):
-                    _tc = self.t0 + (i + self.secphase) * self.period
-                    _t1 = _tc - self.secwin * self.period
-                    _t2 = _tc + self.secwin * self.period
-                    _m = (t_lst > _t1)*(t_lst < _t2)
-                    mask[_m] = False
+
+                # block points near secondary window
+                if self.secvis:
+                    for i in np.arange(i1-1, i2+1):
+                        _tc = self.t0 + (i + self.secphase) * self.period
+                        _t1 = _tc - self.secwin * self.period
+                        _t2 = _tc + self.secwin * self.period
+                        _m = (t_lst > _t1)*(t_lst < _t2)
+                        mask[_m] = False
 
                 smx, smy = smooth_trend(t_lst[mask], f_lst[mask], self.period/self.detrendwin)
                 newf = intp.InterpolatedUnivariateSpline(smx, smy, k=3)
@@ -909,10 +998,15 @@ class MainWindow(tk.Frame):
                     self.t0 = self.t0 + phase0 * self.period
                     self.t0_err = phase0_err * self.period
                     self.priwin = phase14/2
-                    newph_lst = np.linspace(1-2*self.priwin, 1+2*self.priwin, 1000)
+                    ph1 = 1.0 - 2*self.priwin
+                    ph2 = 1.0 + 2*self.priwin
+                    nph = 400
+                    newph_lst = np.linspace(ph1, ph2, nph)
                     newf_lst = get_ecl_kopal(newph_lst, f0, 0.0, r1, r2, inc, u)
                     n0 = (newf_lst < f0-1e-6).sum()
+                    # n0 is the number of data points below f0 (in dimming)
                     n1 = (newf_lst < f0-std).sum()
+                    # n1 is the number of data points 1 sigma below f0
                     relerr = (n0 - n1)/n0/2*np.sqrt(2)
                     phase14_err = phase14 * relerr
                     self.priwin_err = self.priwin * relerr
@@ -920,10 +1014,15 @@ class MainWindow(tk.Frame):
                     self.secphase = phase0
                     self.secphase_err = phase0_err
                     self.secwin = phase14/2
-                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 1000)
+                    ph1 = self.secphase - 2*self.secwin
+                    ph2 = self.secphase + 2*self.secwin
+                    nph = 400
+                    newph_lst = np.linspace(ph1, ph2, nph)
                     newf_lst = get_ecl_kopal(newph_lst, f0, self.secphase, r1, r2, inc, u)
                     n0 = (newf_lst < f0-1e-6).sum()
+                    # n0 is the number of data points below f0 (in dimming)
                     n1 = (newf_lst < f0-std).sum()
+                    # n1 is the number of data points 1 sigma below f0
                     relerr = (n0 - n1)/n0/2*np.sqrt(2)
                     phase14_err = phase14 * relerr
                     self.secwin_err = self.secwin * relerr
@@ -989,7 +1088,10 @@ class MainWindow(tk.Frame):
                     self.t0_err = phase0_err * self.period
                     self.priwin = phase14/2
                     self.priwin_err = phase14_err/2
-                    newph_lst = np.linspace(-2*self.priwin, +2*self.priwin, 1000)
+                    ph1 = -2*self.priwin
+                    ph2 = +2*self.priwin
+                    nph = 400
+                    newph_lst = np.linspace(ph1, ph2, nph)
                     newf_lst = get_ecl_trapz(newph_lst, f0, 0.0, depth, phase14, phase23)
                     self.model_curve[eclipse] = (newph_lst+1, newf_lst)
                 elif eclipse == 'secondary':
@@ -997,7 +1099,10 @@ class MainWindow(tk.Frame):
                     self.secphase_err = phase0_err
                     self.secwin = phase14/2
                     self.secwin_err = phase14_err/2
-                    newph_lst = np.linspace(self.secphase-2*self.secwin, self.secphase+2*self.secwin, 1000)
+                    ph1 = self.secphase - 2*self.secwin
+                    ph2 = self.secphase + 2*self.secwin
+                    nph = 400
+                    newph_lst = np.linspace(ph1, ph2, nph)
                     newf_lst = get_ecl_trapz(newph_lst, f0, self.secphase, depth, phase14, phase23)
                     self.model_curve[eclipse] = (newph_lst, newf_lst)
                 else:
@@ -1717,7 +1822,7 @@ class ControlPanel(tk.Frame):
         self.autoperiod_button = tk.Button(self,
                             text='Auto Period', width=10, state=tk.DISABLED,
                             command = lambda: self.fit_period_auto())
-        self.autoperiod_options = tk.StringVar(value='primary')
+        self.autoperiod_options = tk.StringVar(value='both')
         self.autoperiod_rbs = {
                 'primary': tk.Radiobutton(self,
                             text     = 'Primary',
@@ -2088,8 +2193,21 @@ class ControlPanel(tk.Frame):
         # reset correct-offset check button
         self.correct_offset.set(self.master.master.correct_offset)
 
+        # reset secinvis
+        self.secinvis.set(False)
+
+        # reset detrend window
+        self.detrend_win.set(20)
+
         # reset fit buttons
         self.fit_ooe_button['text'] = 'Fit OoE'
+
+        # reset auto period options
+        self.autoperiod_options.set('both')
+
+        # reset model fit options
+        self.model_pri.set('kopal')
+        self.model_sec.set('kopal')
 
         # reset subtype and flags
         self.subtype.set('detached')
@@ -2321,6 +2439,7 @@ class SourceFrame(tk.Frame):
         control_panel.reset_param()
         control_panel.set_button(True)
 
+        # check if result file exists
         file_path = mainwin.check_folded_exists(tic)
         if file_path:
             # folded fits file already exists
@@ -2330,6 +2449,7 @@ class SourceFrame(tk.Frame):
             self.master.sector_frame.load_sectors(mainwin.sector_lst)
 
         else:
+            # no result file
             mainwin.tic = tic
             if row['Period'] is not np.ma.masked:
                 mainwin.period = row['Period']
@@ -2349,7 +2469,7 @@ class SourceFrame(tk.Frame):
             # put sector list into the sector tree
             self.master.sector_frame.load_sectors(mainwin.sector_lst)
             
-
+            # find period and T0 automatically
             if np.isnan(mainwin.period):
                 mainwin.find_period_auto()
             if np.isnan(mainwin.t0):
@@ -2364,6 +2484,8 @@ class SourceFrame(tk.Frame):
             for flag, var in control_panel.flags.items():
                 if row[flag] is not np.ma.masked and row[flag]==1:
                     control_panel.flag_cbs[flag].select()
+
+            # set the auto period button
 
         # refresh parameters in the control panel
         control_panel.update_param()
