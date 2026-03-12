@@ -142,6 +142,25 @@ def get_sectorinfo(sector, filetype='lc'):
     return timestamp, orbit
 
 
+def get_lc_filename(tic, sector, datapool):
+    timestamp, orbit = get_sectorinfo(sector)
+    lcfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_lc.fits'.format(
+                    timestamp, sector, tic, orbit)
+    path = os.path.join(datapool, 'lc', 's{:03d}'.format(sector))
+
+    lcfilename = os.path.join(path, lcfile)
+    return lcfilename
+
+
+def get_tp_filename(tic, sector, datapool=None):
+    timestamp, orbit = get_sectorinfo(sector)
+    tpfile = 'tess{:013d}-s{:04d}-{:016d}-{:04d}-s_tp.fits'.format(
+                timestamp, sector, tic, orbit)
+    path = os.path.join(datapool, 'tp', 's{:03d}'.format(sector))
+
+    tpfilename = os.path.join(path, tpfile)
+    return tpfilename
+
 
 def download_data(tic, sector, filetype, datapool, show_progress=True):
     script_fname = 'tesscurl_sector_{}_{}.sh'.format(sector, filetype)
@@ -186,11 +205,13 @@ def download_tp(tic, sector, datapool, show_progress=True):
 
 
 def make_target_lst():
+
+    #### make LC targets file
     tic_lst = {}
 
     path1 = os.path.join(cm.DOWNSCRIPT_PATH, 'sector')
     for fname in os.listdir(path1):
-        mobj = re.match('tesscurl_sector_(\d+)_lc.sh', fname)
+        mobj = re.match('tesscurl_sector_(\d+)_lc\.sh', fname)
         if not mobj:
             continue
         sector = int(mobj.group(1))
@@ -208,8 +229,7 @@ def make_target_lst():
                 tic_lst[tic].append(sector)
         file1.close()
 
-    filename = os.path.join(cm.CACHE_PATH, 'tess_target_lc.dat')
-    outfile = open(filename, 'w')
+    outfile = open(cm.LC_TARGETS_FILE, 'w')
     for tic, sector_lst in sorted(tic_lst.items()):
         outfile.write('{:11d}:'.format(tic))
         string_lst = [str(s) for s in sorted(sector_lst)]
@@ -217,3 +237,72 @@ def make_target_lst():
     outfile.close()
 
     print('LC target list updated. N={}'.format(len(tic_lst)))
+
+
+    ##### make fast-LC targets file ###
+    tic_lst = {}
+    path1 = os.path.join(cm.DOWNSCRIPT_PATH, 'sector')
+
+    for fname in os.listdir(path1):
+        mobj = re.match('tesscurl_sector_(\d+)_fast\-lc\.sh', fname)
+        if not mobj:
+            continue
+        sector = int(mobj.group(1))
+
+        filename = os.path.join(path1, fname)
+        file1 = open(filename)
+        for row in file1:
+            if len(row)==0 or row[0]=='#':
+                continue
+            mobj = re.match('[\s\S]+tess\d+\-s\d+\-(\d+)\-\d+\S+\.fits', row)
+            if mobj:
+                tic = int(mobj.group(1))
+                if tic not in tic_lst:
+                    tic_lst[tic] = []
+                tic_lst[tic].append(sector)
+        file1.close()
+
+    outfile = open(cm.FASTLC_TARGETS_FILE, 'w')
+    for tic, sector_lst in sorted(tic_lst.items()):
+        outfile.write('{:11d}:'.format(tic))
+        string_lst = [str(s) for s in sorted(sector_lst)]
+        outfile.write(','.join(string_lst)+os.linesep)
+    outfile.close()
+
+    print('FAST-LC target list updated. N={}'.format(len(tic_lst)))
+
+
+def get_lc_sectors(arg):
+    """
+    """
+    
+    filename = os.path.join(cm.CACHE_PATH, 'tess_target_lc.dat')
+
+    if isinstance(arg, int):
+        tic = arg
+        found = False
+        file1 = open(filename)
+        for row in file1:
+            col = row.split(':')
+            if int(col[0]) == tic:
+                sector_lst = [int(s) for s in col[1].split(',')]
+                found = True
+                break
+        file1.close()
+        if found:
+            return sector_lst
+        else:
+            return []
+    elif isinstance(arg, list):
+        max_tic = max(arg)
+        result_lst = {tic:[] for tic in arg}
+        file1 = open(filename)
+        for row in file1:
+            col = row.split(':')
+            _tic = int(col[0])
+            if _tic in result_lst:
+                result_lst[_tic] = [int(s) for s in col[1].split(',')]
+            if _tic > max_tic:
+                break
+        file1.close()
+        return result_lst
