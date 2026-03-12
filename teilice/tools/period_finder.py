@@ -118,7 +118,7 @@ class MainWindow(tk.Frame):
         self.pack()
 
         self.reset_param()
-        self.plot_frame.control_panel.reset_param()
+        self.plot_frame.control_panel.clear_params()
 
 
     def reset_param(self):
@@ -829,8 +829,19 @@ class MainWindow(tk.Frame):
             all_var_lst = np.array(all_var_lst)
             return all_var_lst.sum()
 
-        result = opt.minimize_scalar(cost,
+        try:
+            result = opt.minimize_scalar(cost,
                     bracket=(-0.01, 0, 0.01), tol=1e-7, method='Brent')
+        except ValueError as e:
+            if str(e) == "Not a bracketing interval.":
+                # invalide bracket. try to find a new bracket
+                try:
+                    a, b, c, fa, fb, fc = opt.bracket(cost, xa=-0.05, xb=0.05)
+                    result = opt.minimize_scalar(cost, bracket=(a, b, c),
+                            tol=1e-7, method = 'Brent')
+                except:
+                    return False
+
         if result.success:
             newratio = result.x
 
@@ -863,6 +874,11 @@ class MainWindow(tk.Frame):
             self.autoperiod_info = {'option': option, 'nbins': nbins}
             # will trigger plot() function here
             self.set_period(new_period, new_period_err)
+            return True
+        else:
+            self.autoperiod_info = None
+            return False
+
 
     def prepare_parsed_lc(self):
         data_lst = {}
@@ -938,6 +954,8 @@ class MainWindow(tk.Frame):
 
         # out of elipse points
         f0 = np.percentile(allflux_lst, 75)
+
+        succ = False
 
         if model == 'kopal':
 
@@ -1042,11 +1060,13 @@ class MainWindow(tk.Frame):
                         'phase14': phase14, 'phase14_err': phase14_err,
                         }
                 self.model_curve[eclipse] = (newph_lst, newf_lst)
+                succ = True
 
             else:
                 # if fitting is not successful
                 self.model_info[eclipse] = None
                 self.model_curve[eclipse] = None
+                succ = False
 
         elif model == 'trapz':
             fbase = np.percentile(allflux_lst, 10)
@@ -1116,20 +1136,25 @@ class MainWindow(tk.Frame):
                         'phase23': phase23, 'phase23_err': phase23_err,
                         'depth': depth, 'depth_err': depth_err,
                         }
+                succ = True
             else:
                 # if fitting is not successful
                 self.model_curve[eclipse] = None
                 self.model_info[eclipse] = None
+                succ = False
 
         else:
             # fitting model is not kopal or trapz
             raise ValueError
 
 
-        # finally, refresh the control panel and replot
-        self.plot_frame.control_panel.update_param()
-        self.plot()
-        self.plot_frame.canvas.draw()
+        if succ:
+            # finally, refresh the control panel and replot
+            self.plot_frame.control_panel.update_param()
+            self.plot()
+            self.plot_frame.canvas.draw()
+
+        return succ
 
 
     def plot(self):
@@ -1655,7 +1680,7 @@ class ControlPanel(tk.Frame):
 
 
         ######## set column 2 #####################
-        self.t0_label = tk.Label(self, text='T0',
+        self.t0_label = tk.Label(self, text=u'T\u2080',
                 font=('TkDefaultFont', 11))
         self.t0_subhalf_button = tk.Button(self,
                 text='T0 - 1/2 Period', width=15, state=tk.DISABLED,
@@ -1981,14 +2006,29 @@ class ControlPanel(tk.Frame):
         sepv5.grid(row=1, column=icol, rowspan=6, sticky='ns', padx=10)
         icol += 1
 
-        #############################3
+        #############################
+        self.reset_button = tk.Button(self,
+                                text = 'Reset',
+                                width = 15,
+                                state = tk.DISABLED,
+                                command = lambda: self.reset_params(),
+                                )
+
         self.apply_button = tk.Button(self,
                                 text  = 'Apply & Save',
                                 width = 15,
                                 state = tk.DISABLED,
-                                command = self.apply_params,
+                                command = lambda: self.apply_params(),
                                 )
-        self.apply_button.grid(row=1, column=icol,
+        self.apply_button.configure(
+                    bg='#4D90FE', fg='white',
+                    activebackground='#357AE8',
+                    activeforeground='white',
+                    )
+
+        self.reset_button.grid(row=1, column=icol,
+                sticky='ew', padx=5, pady=2)
+        self.apply_button.grid(row=2, column=icol,
                 sticky='ew', padx=5, pady=2)
 
         self.pack()
@@ -1997,18 +2037,33 @@ class ControlPanel(tk.Frame):
         self.master.master.change_period(ratio)
         # reset autoperiod_info
         self.master.master.autoperiod_info = None
+        self.params_changed = True
+        self.reset_button['state'] = tk.NORMAL
+        self.apply_button['state'] = tk.NORMAL
 
     def change_t0(self, level):
         self.master.master.change_t0(level)
+        self.params_changed = True
+        self.reset_button['state'] = tk.NORMAL
+        self.apply_button['state'] = tk.NORMAL
 
     def change_priwin(self, ratio):
         self.master.master.change_priwin(ratio)
+        self.params_changed = True
+        self.reset_button['state'] = tk.NORMAL
+        self.apply_button['state'] = tk.NORMAL
 
     def change_secwin(self, ratio):
         self.master.master.change_secwin(ratio)
+        self.params_changed = True
+        self.reset_button['state'] = tk.NORMAL
+        self.apply_button['state'] = tk.NORMAL
 
     def change_secphase(self, ratio):
         self.master.master.change_secphase(ratio)
+        self.params_changed = True
+        self.reset_button['state'] = tk.NORMAL
+        self.apply_button['state'] = tk.NORMAL
 
     def adjust_urej(self):
         self.master.master.change_urej(self.urej.get())
@@ -2017,7 +2072,13 @@ class ControlPanel(tk.Frame):
         self.master.master.change_offset(self.correct_offset.get())
 
     def adjust_detrend_win(self):
-        self.master.master.change_detrendwin(self.detrend_win.get())
+        if self.master.master.lc_trends is None:
+            # do nothing
+            pass
+        else:
+            # update the fitted trend
+            detrend_win = self.detrend_win.get()
+            self.master.master.change_detrendwin(detrend_win)
 
     def fit_ooe(self):
 
@@ -2033,17 +2094,33 @@ class ControlPanel(tk.Frame):
             # change the text of fit button
             self.fit_ooe_button['text'] = 'Fit OoE'
 
+        self.params_changed = True
+        self.reset_button['state'] = tk.NORMAL
+        self.apply_button['state'] = tk.NORMAL
+
     def fit_period_auto(self):
         option = self.autoperiod_options.get()
-        self.master.master.fit_period(option)
+        succ = self.master.master.fit_period(option)
+        if succ:
+            self.params_changed = True
+            self.reset_button['state'] = tk.NORMAL
+            self.apply_button['state'] = tk.NORMAL
 
     def fit_primary(self):
         model = self.model_pri.get()
-        self.master.master.fit_eclipse('primary', model)
+        succ = self.master.master.fit_eclipse('primary', model)
+        if succ:
+            self.params_changed = True
+            self.reset_button['state'] = tk.NORMAL
+            self.apply_button['state'] = tk.NORMAL
 
     def fit_secondary(self):
         model = self.model_sec.get()
-        self.master.master.fit_eclipse('secondary', model)
+        succ = self.master.master.fit_eclipse('secondary', model)
+        if succ:
+            self.params_changed = True
+            self.reset_button['state'] = tk.NORMAL
+            self.apply_button['state'] = tk.NORMAL
 
     def on_secinvis(self):
         if self.secinvis.get():
@@ -2126,20 +2203,19 @@ class ControlPanel(tk.Frame):
             for key, button in self.sub_secphase_buttons.items():
                 button['state'] = tk.NORMAL
 
-
-            # apply button
-            self.apply_button['state'] = tk.NORMAL
-            self.apply_button.configure(
-                    bg='#4D90FE', fg='white',
-                    activebackground='#357AE8',
-                    activeforeground='white',
-                    )
             # subtype radio buttons
             for subtype, rb in self.subtype_rbs.items():
                 rb['state'] = tk.NORMAL
             # falg check buttons
             for flag, cb in self.flag_cbs.items():
                 cb['state'] = tk.NORMAL
+
+            ## reset button
+            #self.reset_button['state'] = tk.NORMAL
+
+            # apply button
+            self.apply_button['state'] = tk.NORMAL
+
 
     def update_param(self):
 
@@ -2153,9 +2229,9 @@ class ControlPanel(tk.Frame):
 
 
         if np.isnan(mainwin.t0_err):
-            text = 'T0 = {:.7f}'.format(mainwin.t0)
+            text = u'T\u2080 = {:.7f}'.format(mainwin.t0)
         else:
-            text = 'T0 = {:.7f} \xb1 {:5.1e}'.format(
+            text = u'T\u2080 = {:.7f} \xb1 {:5.1e}'.format(
                     mainwin.t0, mainwin.t0_err)
         self.t0_label.config(text=text)
 
@@ -2187,7 +2263,17 @@ class ControlPanel(tk.Frame):
             text = 'Tdur = {} d'.format(text1)
         self.tdur_label.config(text=text)
 
-    def reset_param(self):
+    def clear_params(self):
+        """Clear pamarameters of ControlPanel.
+
+        """
+
+        # 
+        self.params_changed = False
+
+        # reset original parameters
+        self.ori_params = {}
+
         # reset upper rejection spinbox
         self.urej.set(self.master.master.display_urej)
         # reset correct-offset check button
@@ -2214,8 +2300,29 @@ class ControlPanel(tk.Frame):
         for flag, var in self.flags.items():
             var.set(False)
 
+    def reset_params(self):
+        """Reset the parameters of ControlPanel to original ones.
+
+        """
+        mainwin = self.master.master
+        mainwin.period       = self.ori_params['period']
+        mainwin.period_err   = self.ori_params['period_err']
+        mainwin.t0           = self.ori_params['t0']
+        mainwin.t0_err       = self.ori_params['t0_err']
+        mainwin.secphase     = self.ori_params['secphase']
+        mainwin.secphase_err = self.ori_params['secphase_err']
+        mainwin.priwin       = self.ori_params['priwin']
+        mainwin.secwin       = self.ori_params['secwin']
+        self.params_changed = False
+        self.reset_button['state'] = tk.DISABLED
+        self.apply_button['state'] = tk.DISABLED
+
     def apply_params(self):
+        """Apply and save the current parameters.
+        """
         self.master.master.right_frame.source_frame.apply_params()
+        self.params_changed = False
+        self.apply_button['state'] = tk.DISABLED
 
 class RightFrame(tk.Frame):
     def __init__(self, master, width, height, source_filename):
@@ -2416,6 +2523,9 @@ class SourceFrame(tk.Frame):
 
 
     def on_select_item(self, event):
+        """Event handler when selecting a new item in source table.
+
+        """
 
         items = event.widget.selection()
         if len(items)==0:
@@ -2436,7 +2546,7 @@ class SourceFrame(tk.Frame):
         control_panel = mainwin.plot_frame.control_panel
 
         # reset control_panel
-        control_panel.reset_param()
+        control_panel.clear_params()
         control_panel.set_button(True)
 
         # check if result file exists
@@ -2472,6 +2582,7 @@ class SourceFrame(tk.Frame):
             # find period and T0 automatically
             if np.isnan(mainwin.period):
                 mainwin.find_period_auto()
+
             if np.isnan(mainwin.t0):
                 mainwin.find_t0_auto()
 
@@ -2485,10 +2596,21 @@ class SourceFrame(tk.Frame):
                 if row[flag] is not np.ma.masked and row[flag]==1:
                     control_panel.flag_cbs[flag].select()
 
-            # set the auto period button
-
         # refresh parameters in the control panel
         control_panel.update_param()
+
+        # register parameters to ori_params so that reset button will
+        # recover them
+        self.ori_params = {
+                'period':       mainwin.period,
+                'period_err':   mainwin.period_err,
+                't0':           mainwin.t0,
+                't0_err':       mainwin.t0_err,
+                'secphase':     mainwin.secphase,
+                'secphase_err': mainwin.secphase_err,
+                'priwin':       mainwin.priwin,
+                'secwin':       mainwin.secwin,
+                }
 
         mainwin.plot()
         mainwin.plot_frame.canvas.draw()
@@ -2618,7 +2740,6 @@ class SourceFrame(tk.Frame):
                 mainwin.tic, s1, s2)
         figfilename = mainwin.figure_path / figname
         mainwin.plot_frame.fig.savefig(figfilename)
-
 
     def save_fits(self, filename):
 
