@@ -27,7 +27,7 @@ from astroquery.vizier import Vizier
 import tkinter as tk
 import tkinter.ttk as ttk
 
-from .. import TessTarget
+from ..tesstarget import TessTarget
 from ..utils import get_lc_sectors
 from ..visual import get_aperture_bound
 from ..periodogram import GLS
