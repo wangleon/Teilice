@@ -96,9 +96,6 @@ class TessTarget(object):
         # get star info
         self.tic = int(tic)
 
-        # get nearby stars
-        #self.get_nearbystars()
-
     def __getattr__(self, item):
         if item in ['ra', 'dec', 'tmag', 'coord', 'ticrow', 'gaiarow']:
             info = get_sourceinfo(self.tic)
@@ -109,8 +106,10 @@ class TessTarget(object):
             self.ticrow = info['ticrow']
             self.gaiarow = info['gaiarow']
             return getattr(self, item)
-
-
+        elif item == 'tictable':
+            # dynamic query nearby stars
+            self.get_nearbystars()
+            return getattr(self, item)
 
     def get_nearbystars(self, r=250, cache_path=NEARBY_PATH):
         """Query nearby stars within given radius.
